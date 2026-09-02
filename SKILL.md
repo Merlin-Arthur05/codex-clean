@@ -1,11 +1,23 @@
 ---
 name: codex-clean
-description: "清理 Codex 自身的对话/工作缓存、日志和临时文件，释放磁盘空间、处理 WAL 膨胀时使用。触发词：清理Codex缓存、Codex日志太多、Codex占空间、清理Codex临时文件、codex cache clean、codex log clean、codex SSD占用。默认只读扫描出可安全清理项并给出大小，用户逐项确认后才执行；只清理 Codex 自身可再生缓存/日志(.tmp、plugins/cache)、对日志/状态数据库执行 VACUUM 收缩与 WAL 清理，绝不触碰 Codex 可执行文件、对话历史、状态数据、配置文件、工作项目文件。"
+description: "Codex 专属的运行时缓存/日志清理——只针对 Codex 自身(~/.codex)产生的可再生数据，与通用电脑清理(qing-li-dian-nao)完全不同：不清电脑磁盘、不整理文件、不扫项目目录。适用场景：Codex 磁盘占用膨胀、Codex 日志/临时文件过多、logs_2.sqlite 及 WAL 巨大、SSD 写入量大时使用。触发词：清理Codex缓存、Codex日志太多、Codex占空间、codex cache clean、codex log clean、codex SSD占用、clean up codex。独有能力：①对 Codex 的 SQLite 库执行 VACUUM + WAL checkpoint(TRUNCATE)——这是通用清理工具没有的、针对 Codex 日志库/WAL 膨胀的专用手段；②logs_2.sqlite(仅诊断日志、非会话)超过100MB可备份后重建；③输出支持中英双语随客户端语言切换(--lang/CODEX_CLEAN_LANG)；④纯标准库零依赖。安全边界：只删可重建缓存(.tmp/plugins/cache)、只真空不删库内数据，绝不触碰会话历史(sessions)、state/记忆/目标库内容、auth.json/config.toml、bin/runtimes 可执行文件及用户项目。默认先只读扫描列清单，逐项确认后才执行。"
 ---
 
 # Codex 缓存与日志完整清理
 
 清理 Codex（~/.codex）自身产生的、可安全重建或收缩的缓存、日志、WAL 文件，释放磁盘空间。
+
+## 和通用清理技能（如 qing-li-dian-nao）的区别
+
+| 维度 | 本技能 codex-clean | 通用电脑清理（qing-li-dian-nao 等） |
+|---|---|---|
+| 清理对象 | 只针对 **Codex 应用自身** `~/.codex` 的运行时数据 | 整台电脑：C 盘、下载/桌面/文档、大文件/重复文件 |
+| 不碰 | 电脑文件、项目目录、其他工具 | Codex 的会话/日志 DB 结构通常不在其清单内 |
+| 独有能力 | **SQLite VACUUM + WAL checkpoint(TRUNCATE)** 处理 `logs_2.sqlite`/WAL 膨胀；超大日志库备份重建 | 通用磁盘扫描、Docker/WSL/浏览器缓存等 |
+| 输出 | 中英双语，随客户端语言（`--lang`/`CODEX_CLEAN_LANG`） | 一般为单一语言 |
+| 触发时机 | 用户明确说 Codex 缓存/日志/占用时才用；**不要**在"清电脑/C 盘/整理文件"场景误触发 | 用户说"清理电脑/整理文件/找大文件"时触发 |
+
+> 一句话：**codex-clean 是 Codex 的"自体清洁"，不是电脑管家**。若用户要求清理电脑/磁盘，应交给通用清理技能而非本技能。
 
 ## 核心契约
 

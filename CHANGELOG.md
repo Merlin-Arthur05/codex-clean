@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- SKILL.md description: clearly differentiate from generic computer-cleanup skills
+  (e.g. qing-li-dian-nao) — codex-clean only targets Codex's own runtime data, adds a
+  dedicated comparison section, and highlights unique capabilities (SQLite VACUUM/WAL,
+  oversized log rebuild, i18n output, stdlib-only).
+
 ## [1.0.1] - 2026-09-02
 
 ### Added
