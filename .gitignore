@@ -1,0 +1,7 @@
+# 排除
+__pycache__/
+*.pyc
+*.bak
+*.bak-*
+.DS_Store
+Thumbs.db
