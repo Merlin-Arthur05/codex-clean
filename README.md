@@ -6,11 +6,27 @@
 
 **A safe, confirm-before-clean tool that frees disk space from Codex's own cache, logs, and WAL files — never touching your conversations, configs, or projects.**
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 `codex-clean` targets only the regenerable, self-produced data inside `~/.codex` that grows over time (temporary plugin downloads, plugin cache, the diagnostic `logs_2.sqlite` database and its write-ahead-log, plus bloat in state databases via `VACUUM`). Conversation history, state data, authentication, configuration, and Codex executables are **never** touched.
 
 > Also packaged as a [Codex Agent Skill](#install-as-a-codex-skill): say *"clean Codex cache"* in Codex and it runs scan-confirm-clean for you.
 
 ---
+
+## Not a generic computer cleaner
+
+`codex-clean` does **not** scan your disk, organize files, or clean your whole
+machine. Generic cleanup skills (e.g. `qing-li-dian-nao`) target the entire
+computer; this tool targets the runtime data of **one app — Codex**, and adds
+capabilities generic cleaners don't have:
+
+| Dimension | codex-clean | Generic computer cleanup |
+|---|---|---|
+| Scope | Only Codex's own `~/.codex` | Whole-machine disk / files |
+| Unique capability | SQLite **VACUUM + WAL checkpoint**, oversized log-DB rebuild | Generic file scanning |
+| Output language | Bilingual (en/zh), follows client language | Single language |
+| Trigger | "Codex cache / logs / disk usage" | "clean my computer / organize files / disk full" |
 
 ## Why
 
@@ -76,15 +92,75 @@ python scripts/codex_clean.py --clean --yes --vacuum
 # 5. Also rebuild an oversized log DB (>100 MB, backs up first)
 python scripts/codex_clean.py --clean --yes --rebuild-logs
 
-# 6. Machine-readable output
+# 6. Only clean temp files older than 7 days (keeps recent files)
+python scripts/codex_clean.py --scan --age 7
+python scripts/codex_clean.py --clean --yes --age 7
+
+# 7. Machine-readable output (includes a per-item "what would happen" preview)
 python scripts/codex_clean.py --scan --json
 
-# 7. Choose output language: en | zh | auto (default)
+# 8. JSON cleanup report — estimated vs actually freed
+python scripts/codex_clean.py --clean --yes --vacuum --json
+
+# 9. Choose output language: en | zh | auto (default)
 python scripts/codex_clean.py --scan --lang zh
 ```
 
-**Output language.** User-facing text (scan list, confirm prompts, results) is
-localized. Resolution order: `--lang` argument → `CODEX_CLEAN_LANG` env var →
+### `--age N` — filter by file age
+
+With `--age N`, **delete** items only touch files whose modification time is
+older than N days; newer files are left alone. Useful when you don't want to
+wipe an entire cache, and it avoids deleting files Codex may be actively using.
+
+- On scan: `size` shows the **eligible** (reclaimable) bytes, `total_size` shows
+  the whole directory.
+- On clean: only aged files are removed, plus directories left empty by that.
+- Applies to delete items only; VACUUM / rebuild are unaffected (they shrink
+  existing databases and involve no file ages).
+
+### `--json` output
+
+**Scan mode** (`--scan --json`) returns an array. Alongside the stable
+`name` / `kind` / `size` keys, each item carries v1.2.0 preview fields:
+
+```jsonc
+{
+  "name": "tmp", "kind": "delete", "path": "...", "size": "200.0 KB",
+  "age_filter_days": 7,
+  "eligible_bytes": 204800, "eligible_files": 1, "total_files": 2,
+  "total_size": "230.0 KB",
+  "planned_action": {
+    "type": "delete", "target": "...",
+    "reclaimable_bytes": 204800, "reclaimable": "200.0 KB",
+    "reversible": false, "confirm_required": true, "age_filter_days": 7
+  },
+  "safe": true
+}
+```
+
+**Clean mode** (`--clean --yes --json`) returns a report whose core is the
+**estimated vs actual** comparison:
+
+```jsonc
+{
+  "ok": true, "dry_run": false, "version": "1.2.0",
+  "estimated_bytes": 215040, "actual_freed_bytes": 204800, "delta_bytes": -10240,
+  "items": [
+    { "name": "tmp", "kind": "delete", "status": "ok",
+      "estimated_bytes": 204800, "actual_bytes": 204800, "message": "..." }
+  ],
+  "protected_untouched": ["sessions", "config.toml", "auth.json", "..."]
+}
+```
+
+> `--clean --json` requires `--yes` (JSON mode cannot prompt interactively).
+
+For VACUUM items, `actual_bytes` is the **measured** shrink (main DB + WAL + SHM
+before vs after `VACUUM`), not an estimate — so the delta tells you how far
+reality landed from the prediction.
+
+**Output language.** User-facing text (scan list, confirm prompts, results, and
+the `--help` screen) is localized. Resolution order: `--lang` argument → `CODEX_CLEAN_LANG` env var →
 `LANG`/`LC_ALL` → OS UI language → English. So in a Chinese client just set
 `CODEX_CLEAN_LANG=zh` (or call with `--lang zh`); English tools get English by
 default. `--json` output uses the localized `desc`/`action` fields with the
@@ -105,7 +181,6 @@ Then in Codex just say: **"清理 Codex 缓存"** / **"Codex 日志太多"** / *
 ## Roadmap / Ideas
 
 - Automatic WAL-growth watchdog suggestion (periodic scan reminder).
-- `--age N` filtering for stale temp files.
 - Optional integration as a Windows scheduled task (opt-in only).
 - **Multi-agent support**: extend cleanup targets to other AI coding CLIs, starting
   with `pi` ([@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent))

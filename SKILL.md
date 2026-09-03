@@ -1,6 +1,6 @@
 ---
 name: codex-clean
-description: "Codex 专属的运行时缓存/日志清理——只针对 Codex 自身(~/.codex)产生的可再生数据，与通用电脑清理(qing-li-dian-nao)完全不同：不清电脑磁盘、不整理文件、不扫项目目录。适用场景：Codex 磁盘占用膨胀、Codex 日志/临时文件过多、logs_2.sqlite 及 WAL 巨大、SSD 写入量大时使用。触发词：清理Codex缓存、Codex日志太多、Codex占空间、codex cache clean、codex log clean、codex SSD占用、clean up codex。独有能力：①对 Codex 的 SQLite 库执行 VACUUM + WAL checkpoint(TRUNCATE)——这是通用清理工具没有的、针对 Codex 日志库/WAL 膨胀的专用手段；②logs_2.sqlite(仅诊断日志、非会话)超过100MB可备份后重建；③输出支持中英双语随客户端语言切换(--lang/CODEX_CLEAN_LANG)；④纯标准库零依赖。安全边界：只删可重建缓存(.tmp/plugins/cache)、只真空不删库内数据，绝不触碰会话历史(sessions)、state/记忆/目标库内容、auth.json/config.toml、bin/runtimes 可执行文件及用户项目。默认先只读扫描列清单，逐项确认后才执行。"
+description: "Codex 专属的运行时缓存/日志清理——只针对 Codex 自身(~/.codex)产生的可再生数据，与通用电脑清理(qing-li-dian-nao)完全不同：不清电脑磁盘、不整理文件、不扫项目目录。适用场景：Codex 磁盘占用膨胀、Codex 日志/临时文件过多、logs_2.sqlite 及 WAL 巨大、SSD 写入量大时使用。触发词：清理Codex缓存、Codex日志太多、Codex占空间、codex cache clean、codex log clean、codex SSD占用、clean up codex。独有能力：①对 Codex 的 SQLite 库执行 VACUUM + WAL checkpoint(TRUNCATE)——这是通用清理工具没有的、针对 Codex 日志库/WAL 膨胀的专用手段；②logs_2.sqlite(仅诊断日志、非会话)超过100MB可备份后重建；③输出支持中英双语随客户端语言切换(--lang/CODEX_CLEAN_LANG)；④纯标准库零依赖；⑤`--age N` 按文件年龄只清超过 N 天的过期临时文件（保留近期文件，避免误删正在使用的缓存）；⑥`--json` 输出含每项的 planned_action 预览，以及清理后"预估释放 vs 实际释放"对比。安全边界：只删可重建缓存(.tmp/plugins/cache)、只真空不删库内数据，绝不触碰会话历史(sessions)、state/记忆/目标库内容、auth.json/config.toml、bin/runtimes 可执行文件及用户项目。默认先只读扫描列清单，逐项确认后才执行。"
 ---
 
 # Codex 缓存与日志完整清理
@@ -58,11 +58,14 @@ python "<skill>\scripts\codex_clean.py" --scan
 - `--clean --yes`：跳过交互，清理全部"纯删除 + WAL"安全项
 - `--clean --yes --vacuum`：额外对数据库执行 VACUUM（推荐完整清理用这个）
 - `--clean --yes --rebuild-logs`：额外允许重建超大日志库（>100MB 时建议，先备份）
-- `--json`：结构化输出
+- `--age N`：只处理**修改时间超过 N 天**的临时文件，较新的文件保留（只对删除类生效；`--scan --age 7` 可先预览）
+- `--json`：结构化输出。扫描模式每项含 `planned_action`（将要执行的动作与可回收量）；清理模式（`--clean --yes --json`）输出 `estimated_bytes` / `actual_freed_bytes` / `delta_bytes` 的预估与实际对比，以及 `protected_untouched` 保护清单
+- `--lang en|zh|auto`：输出语言（默认按客户端语言自动检测）
 
 ## 执行规则
 
 1. 先跑 `--scan`，把结果以清单形式呈现给用户（含每项大小、类别 delete/vacuum/rebuild）。
+   - 若用户只想清"堆积的旧垃圾"而保留近期缓存，用 `--scan --age N`（如 N=7）先预览符合条件的量。
 2. 用户逐项确认后再执行。
    - 纯删除项（tmp/plugins-cache）用户确认即可删。
    - VACUUM 项需说明"保留数据只收缩"，一般推荐允许。
