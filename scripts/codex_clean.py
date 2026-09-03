@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Codex cache/log full cleaner (v1.2.0) — i18n + age filter + rich JSON.
+Codex cache/log full cleaner (v1.2.1) — i18n + age filter + rich JSON.
 
 Safely cleans regenerable cache/log/WAL files under ~/.codex, using a strict
 whitelist and a confirm-before-clean workflow. Protected data (conversations,
@@ -37,8 +37,8 @@ import time
 from pathlib import Path
 
 CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
-# Single source of truth: keep in sync with the GitHub Release tag (v1.2.0).
-VERSION = "1.2.0"
+# Single source of truth: keep in sync with the GitHub Release tag (v1.2.1).
+VERSION = "1.2.1"
 
 # ---------------------------------------------------------------- i18n ----
 _MSGS = {
@@ -47,7 +47,7 @@ _MSGS = {
         "scan.title": "=== Codex cleanable items (read-only scan) ===",
         "scan.codedir": "Codex directory: {path}",
         "scan.agefilter": "Age filter: only files older than {days} days are counted",
-        "scan.reclaim": "Total reclaimable (incl. VACUUM): {size}",
+        "scan.reclaim": "Estimated reclaimable: {size}",
         "scan.hint": "\nRun --clean to confirm item-by-item; --clean --yes to clean all safe items;",
         "scan.hint2": "add --vacuum to allow DB VACUUM; add --rebuild-logs to rebuild oversized log DB.",
         "desc.tmp": "Temp download/extract cache (plugins/marketplaces)",
@@ -101,7 +101,7 @@ _MSGS = {
         "scan.title": "=== Codex 可清理项(只读扫描) ===",
         "scan.codedir": "Codex 目录: {path}",
         "scan.agefilter": "年龄过滤: 仅统计超过 {days} 天的文件",
-        "scan.reclaim": "全部可回收(含VACUUM): {size}",
+        "scan.reclaim": "预计可回收: {size}",
         "scan.hint": "\n运行 --clean 逐项确认; --clean --yes 全清安全项;",
         "scan.hint2": "加 --vacuum 允许 VACUUM; 加 --rebuild-logs 允许重建超大日志库。",
         "desc.tmp": "临时下载/解压缓存(插件/市场)",
@@ -308,10 +308,9 @@ def _planned_action(kind: str, path: str, reclaim_bytes: int, days: int) -> dict
 def scan(age_days: int = 0):
     items = []
     for name, path, dkey in DELETABLE:
-        total_sz = _size_of(path)
         eb, ec, tb, tc = _age_stats(path, age_days)
         # With an age filter only the eligible bytes are actually reclaimable.
-        sz = eb if age_days > 0 else total_sz
+        sz = eb if age_days > 0 else tb
         action = (_t("action.delete_aged", days=age_days, size=human(sz))
                   if age_days > 0 else _t("action.delete", size=human(sz)))
         items.append({
@@ -321,7 +320,8 @@ def scan(age_days: int = 0):
             "age_filter_days": age_days if age_days > 0 else None,
             "eligible_bytes": eb, "eligible_size": human(eb),
             "eligible_files": ec, "total_files": tc,
-            "total_bytes": total_sz, "total_size": human(total_sz),
+            "total_bytes": tb, "total_size": human(tb),
+            "reclaimable_bytes": sz,
             "planned_action": _planned_action("delete", str(path), sz, age_days),
             "safe": True,
         })
@@ -335,6 +335,7 @@ def scan(age_days: int = 0):
             "exists": has_db, "db_main": main, "db_wal": wal, "db_shm": shm,
             "action": _t("action.vacuum"),
             "age_filter_days": None,
+            "reclaimable_bytes": wal,
             "planned_action": _planned_action("vacuum", str(db_path), wal, 0),
             "safe": True,
         })
@@ -345,9 +346,12 @@ def scan(age_days: int = 0):
                 "size_bytes": main, "size": human(main), "exists": True,
                 "action": _t("action.rebuild", size=human(main)),
                 "age_filter_days": None,
+                "reclaimable_bytes": main,
                 "planned_action": _planned_action("rebuild", str(db_path), main, 0),
                 "safe": False,  # destructive: requires explicit --rebuild-logs
             })
+    # Surface the biggest reclaimable wins first for easier triage.
+    items.sort(key=lambda i: i.get("reclaimable_bytes", 0), reverse=True)
     return items
 
 
@@ -481,7 +485,7 @@ def main():
             print(f"  [{it['kind']:<6}] {it['size']:>10}  {it['name']:<14} {it['desc']}")
             if it["exists"]:
                 print(f"              {it['path']}")
-        tot = sum(i["size_bytes"] for i in items if i["exists"])
+        tot = sum(i.get("reclaimable_bytes", 0) for i in items if i["exists"])
         print(f"\n{_t('scan.reclaim', size=human(tot))}")
         print(_t("scan.hint"))
         print(_t("scan.hint2"))
@@ -542,7 +546,8 @@ def main():
         print(_t("confirm.none"))
         return 0
 
-    estimated = sum(c["size_bytes"] for c in candidates if c["name"] in confirmed)
+    estimated = sum(c.get("reclaimable_bytes", c["size_bytes"])
+                    for c in candidates if c["name"] in confirmed)
     results = []
     freed = 0
 

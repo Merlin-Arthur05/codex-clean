@@ -5,9 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.1] - 2026-09-04
 
-Nothing yet.
+### Fixed
+
+- **Accurate "reclaimable" total**: the scan's "Estimated reclaimable" figure previously
+  summed the full SQLite database file sizes (main + WAL + SHM), which overstated what
+  cleanup can actually free - VACUUM only reclaims the WAL and internal free pages, not the
+  live data. Each item now reports a `reclaimable_bytes` amount (delete = deletable size;
+  vacuum = WAL size; rebuild = log DB size) and the total is summed from these, so the
+  number reflects reality.
+- **`--clean` estimate consistency**: the clean-mode `estimated` figure now uses the same
+  `reclaimable_bytes` basis as the scan, so "estimated vs actual" is apples-to-apples.
+
+### Changed
+
+- Scan output and the `--json` item list are now sorted by `reclaimable_bytes`
+  (largest first) for easier triage.
+- Removed a redundant directory walk in the scan (size + age are now computed in a single
+  pass), slightly reducing scan time on large cache trees.
 
 ## [1.2.0] - 2026-09-04
 
