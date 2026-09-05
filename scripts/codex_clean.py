@@ -34,6 +34,7 @@ _MSGS = {
         "scan.codedir": "Codex directory: {path}",
         "scan.agefilter": "Age filter: only files older than {days} days are counted",
         "scan.reclaim": "Estimated reclaimable: {size}",
+        "scan.of_total": "  (DB total {size})",
         "scan.hint": "\nRun --clean to confirm item-by-item; --clean --yes to clean all safe items;",
         "scan.hint2": "add --vacuum to allow DB VACUUM; add --rebuild-logs to rebuild oversized log DB.",
         "desc.tmp": "Temp download/extract cache (plugins/marketplaces)",
@@ -88,6 +89,7 @@ _MSGS = {
         "scan.codedir": "Codex 目录: {path}",
         "scan.agefilter": "年龄过滤: 仅统计超过 {days} 天的文件",
         "scan.reclaim": "预计可回收: {size}",
+        "scan.of_total": "  (库总 {size})",
         "scan.hint": "\n运行 --clean 逐项确认; --clean --yes 全清安全项;",
         "scan.hint2": "加 --vacuum 允许 VACUUM; 加 --rebuild-logs 允许重建超大日志库。",
         "desc.tmp": "临时下载/解压缓存(插件/市场)",
@@ -460,8 +462,11 @@ def main():
             print(_t("scan.agefilter", days=args.age))
         print()
         for it in items:
-            exists = "✓" if it["exists"] else "·"
-            print(f"  [{it['kind']:<6}] {it['size']:>10}  {it['name']:<14} {it['desc']}")
+            # Column shows the reclaimable amount so it sums to the footer; the DB
+            # total is annotated when the two differ (VACUUM reclaims the WAL only).
+            disp = it.get("reclaimable_bytes", it["size_bytes"])
+            note = _t("scan.of_total", size=it["size"]) if disp != it["size_bytes"] else ""
+            print(f"  [{it['kind']:<6}] {human(disp):>10}  {it['name']:<14} {it['desc']}{note}")
             if it["exists"]:
                 print(f"              {it['path']}")
         tot = sum(i.get("reclaimable_bytes", 0) for i in items if i["exists"])

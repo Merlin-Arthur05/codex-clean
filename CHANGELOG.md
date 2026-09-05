@@ -31,6 +31,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > No version bump: documentation, comments and issue planning only.
 > The script's `VERSION` remains `1.2.1`.
 
+### Fixed
+
+- **Scan listing numbers now add up.** The size column showed each database's
+  total size (main + WAL + SHM) while the "Estimated reclaimable" footer summed
+  only the reclaimable amounts (the WAL, for VACUUM items). On a real
+  `~/.codex` the listed column added up to 129.5 MB against a 107.3 MB footer —
+  a 22.2 MB overstatement. The column now shows the reclaimable amount and
+  annotates the database total in parentheses, e.g.
+  `logs-db  13.4 MB  (DB total 34.0 MB)`. The JSON contract is unchanged:
+  `size_bytes` still reports the total and `reclaimable_bytes` the reclaimable
+  amount.
+- Restored the Chinese `SKILL.md` in the local skill install, which the previous
+  commit had overwritten with the new English canonical. The repo keeps English
+  as canonical; the local install matches the user's Chinese Codex client.
+
 ## [1.2.1] - 2026-09-04
 
 ### Fixed
