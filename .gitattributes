@@ -1,0 +1,2 @@
+# Normalize line endings to LF on check-in (repo previously had mixed CRLF/LF).
+* text=auto eol=lf
