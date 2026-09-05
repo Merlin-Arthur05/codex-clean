@@ -4,16 +4,27 @@
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)]()
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**A safe, confirm-before-clean tool that frees disk space from Codex's own cache, logs, and WAL files — never touching your conversations, configs, or projects.**
+**A safe, confirm-before-clean tool that frees disk space from AI coding agents' cache, logs, and WAL files — built for OpenAI Codex, with more agents on the roadmap. Never touches your conversations, configs, or projects.**
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-`codex-clean` targets only the regenerable, self-produced data inside `~/.codex` that grows over time (temporary plugin downloads, plugin cache, the diagnostic `logs_2.sqlite` database and its write-ahead-log, plus bloat in state databases via `VACUUM`). Conversation history, state data, authentication, configuration, and Codex executables are **never** touched.
+`codex-clean` targets only the regenerable, self-produced data inside `~/.codex` that grows over time (temporary plugin downloads, plugin cache, the diagnostic `logs_2.sqlite` database and its write-ahead-log, plus bloat in state databases via `VACUUM`). Conversation history, state data, authentication, configuration, and Codex executables are **never** touched. Codex is the first - and currently the only fully supported - agent; pi and opencode are on the roadmap (see [Supported agents](#supported-agents)).
 
 > Also packaged as a [Codex Agent Skill](#install-as-a-codex-skill) (available in [English](SKILL.md) and [简体中文](SKILL.zh-CN.md)): say *"clean Codex cache"* in Codex and it runs scan-confirm-clean for you.
 
 ---
 
+## Supported agents
+
+`codex-clean` is built **primarily for OpenAI Codex**, and is already structured to support more agents. Every agent gets the same scan -> confirm -> clean flow and protected-list safety contract.
+
+| Agent | Status | What gets cleaned |
+|---|---|---|
+| **OpenAI Codex** | Supported (current) | `~/.codex` cache, logs, WAL, and state-DB bloat |
+| **pi** - [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | Planned - v1.3.0 ([#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)) | `~/.pi` data / cache / logs |
+| **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | Planned - v1.3.0 ([#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)) | XDG data / log / cache + WAL-mode `opencode.db` |
+
+The per-agent registry refactor that makes adding an agent a one-line spec is tracked in [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11); see [Roadmap](#roadmap--ideas).
 ## Not a generic computer cleaner
 
 `codex-clean` does **not** scan your disk, organize files, or clean your whole
