@@ -6,13 +6,25 @@
 
 [English](README.md) | 简体中文
 
-**一个"先确认再清理"的安全工具：只回收 Codex 自身的缓存、日志和 WAL 文件占用的磁盘空间，绝不碰你的对话记录、配置和项目文件。**
+**一个"先确认再清理"的安全工具：回收 AI 编程 Agent 自身的缓存、日志和 WAL 文件占用的磁盘空间——主力面向 OpenAI Codex，并已规划支持更多 Agent。绝不碰你的对话记录、配置和项目文件。**
 
-`codex-clean` 只针对 `~/.codex` 内部**可再生的、Codex 自己产生**的数据：插件的临时下载、插件缓存、诊断日志库 `logs_2.sqlite` 及其预写日志（WAL），以及通过 `VACUUM` 回收的状态库空洞。对话历史、状态数据、登录凭证、配置文件和 Codex 可执行文件**一律不碰**。
+`codex-clean` 只针对 `~/.codex` 内部**可再生的、Codex 自己产生**的数据：插件的临时下载、插件缓存、诊断日志库 `logs_2.sqlite` 及其预写日志（WAL），以及通过 `VACUUM` 回收的状态库空洞。对话历史、状态数据、登录凭证、配置文件和 Codex 可执行文件**一律不碰**。 Codex 是首个、也是当前唯一完全支持的 Agent；pi 与 opencode 已在路线图中（见上方「支持的 Agent」）。
 
 > 同时打包为 [Codex Agent Skill](#安装为-codex-技能)（提供[英文](SKILL.md)与[简体中文](SKILL.zh-CN.md)两版）：在 Codex 里说一句"清理 Codex 缓存"，它会自动扫描 → 向你确认 → 再清理。
 
 ---
+
+## 支持的 Agent
+
+`codex-clean` **主力面向 OpenAI Codex** 构建，但架构上已规划支持更多 Agent。每个 Agent 都复用同一套"扫描 -> 确认 -> 清理"流程与保护清单安全契约。
+
+| Agent | 状态 | 清理内容 |
+|---|---|---|
+| **OpenAI Codex** | 当前已支持 | `~/.codex` 缓存、日志、WAL 及状态库空洞 |
+| **pi** - [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | 规划中 - v1.3.0（[#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)） | `~/.pi` 数据 / 缓存 / 日志 |
+| **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | 规划中 - v1.3.0（[#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)） | XDG 数据 / 日志 / 缓存 + WAL 模式的 `opencode.db` |
+
+把清理目标重构为"按 Agent 注册表"、新增 Agent 只需一条规格的改动见 [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11)；详见[路线图](#路线图)。
 
 ## 与"通用电脑清理"工具的区别
 
