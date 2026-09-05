@@ -1,5 +1,7 @@
 # Contributing to codex-clean
 
+[English](CONTRIBUTING.md) | [简体中文](CONTRIBUTING.zh-CN.md)
+
 Thanks for your interest! This is a small, focused tool — here's how to help without stepping on its safety design.
 
 ## Ground rules

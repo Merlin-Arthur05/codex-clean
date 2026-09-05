@@ -51,3 +51,60 @@
 
 ### 发布状态
 - 版本号升 v1.2.1（PATCH）；脚本 `VERSION` 与 Release 一致。
+
+
+---
+
+## 2026-09-05 — 文档双语化 + 注释精简 + opencode 列入迭代（无版本迭代）
+
+**范围**：不加新功能、不升版本、不发 Release。仅文档 / 注释 / issue 规划。
+
+### 1. opencode 兼容提上日程（Issue #11 / #12，Milestone v1.3.0）
+
+路径全部从 `anomalyco/opencode` 源码核实，未凭印象编写：
+
+- `packages/core/src/global.ts`：经 `xdg-basedir` 解析 —— `data = $XDG_DATA_HOME/opencode`、
+  `log = <data>/log`、`repos = <data>/repos`、`cache = $XDG_CACHE_HOME/opencode`、
+  `bin = <cache>/bin`、`tmp = os.tmpdir()/opencode`。
+- `packages/core/src/database/database.ts` 与 `drizzle.config.ts`：数据库为 `<data>/opencode.db`，
+  且显式执行 `PRAGMA journal_mode = WAL` —— 因此存在 `-wal` / `-shm` 文件，
+  正好命中本工具已有的 VACUUM + WAL checkpoint 能力。
+
+- **#12** 负责 opencode 的清理目标与保护清单（`repos/` 是用户克隆的仓库、`config/` 含配置与凭证，必须保护）。
+- **#11** 负责把清理目标重构为「按 agent 组织的注册表」，避免为第二个、第三个 agent 复制扫描/清理逻辑。
+
+### 2. 代码注释精简并统一英文
+
+注释原本就已是英文，本次核心是**精简**：
+
+- 模块 docstring 25 行 → 11 行；`_pre_scan_lang` / `_age_stats` / `vacuum_db` 的多行 docstring 压成一行（或两行）。
+- 分隔横幅（`# ---- i18n ----`）改为短标记（`# i18n`）。
+- 文件 627 → 606 行；校验通过：注释中无 CJK 残留、无超长注释行、关键逻辑 token 未丢失。
+- 自测 **10/10 通过**：年龄过滤（100KB 老文件计入、50KB 新文件不计入）、可回收量降序、
+  `--clean` 精确释放 100KB 且新文件保留、保护清单存在、VACUUM 实测回收 2.0MB、
+  `--age -1` 退出码 2、`--help --lang zh` 本地化。确认纯注释改动无行为影响。
+
+### 3. 文档双语化
+
+约定：**无后缀 `.md` = 英文主版，`.zh-CN.md` = 中文版**，两份互相链接。
+
+- 新增 `SKILL.zh-CN.md`（原 SKILL.md 中文内容迁出），`SKILL.md` 改写为英文版
+  （frontmatter `description` 保留中英双语触发词，不影响 Codex 触发）。
+- 新增 `CONTRIBUTING.zh-CN.md`；英文 `CONTRIBUTING.md` 增加语言切换行。
+- 两份 README 的路线图同步补入 opencode / 多 agent 注册表，并互链双语文档。
+- 仓库 About 描述改为中英双语，补充 10 个 topics。
+- **Project #3 看板 README 首次写入**（此前为空），中英双段：版本规则、里程碑表、安全契约。
+
+### 4. 踩坑记录
+
+- Windows 版 Python 不认 Git Bash 的 `/tmp` 路径，用 `CODEX_HOME=/tmp/xxx` 做冒烟测试会
+  静默扫到空目录（全部 0 B，看起来"通过"实则没测到）。测试必须用 Windows 路径
+  （如 `C:/Users/.../Temp/...`）或在 Python 内用 `tempfile.mkdtemp()` 建目录。
+- 正则替换里若写 `r'...\n...'`（raw string 中的双反斜杠），匹配的是字面 `
+` 文本而非换行，
+  会静默失配；匹配跨行文本应直接用 `
+` 或 `.*?` + `re.S`，并配 `assert` 计数。
+
+### 5. 发布状态
+
+本次为纯文档/注释/规划改动，**未升版本号、未发 Release**；main 上脚本 `VERSION` 仍为 `1.2.1`。

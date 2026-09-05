@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Bilingual docs**: `SKILL` and `CONTRIBUTING` now ship in two languages
+  (`SKILL.md` / `SKILL.zh-CN.md`, `CONTRIBUTING.md` / `CONTRIBUTING.zh-CN.md`),
+  matching the existing `README.md` / `README.zh-CN.md` split. Convention: the
+  un-suffixed file is English, `.zh-CN.md` is Chinese, and each links to the other.
+- **opencode support scheduled**: new issues #12 (opencode cleanup targets, with
+  every path verified against the `anomalyco/opencode` source) and #11 (refactor
+  cleanup targets into a per-agent registry), both under Milestone v1.3.0.
+- The project board now carries a bilingual README documenting the versioning
+  rules, the milestones, and the safety contract.
+
+### Changed
+
+- Code comments and docstrings condensed and kept uniformly English: module
+  docstring 25 -> 11 lines, multi-line function docstrings collapsed to one line
+  where possible, ASCII banner separators replaced with short section markers.
+  Comments-only change (627 -> 606 lines), verified by the full self-test suite.
+- Repository description is now bilingual; added topics (codex, cleanup, cache,
+  sqlite, vacuum, disk-space, cli, python, developer-tools).
+
+> No version bump: documentation, comments and issue planning only.
+> The script's `VERSION` remains `1.2.1`.
+
 ## [1.2.1] - 2026-09-04
 
 ### Fixed

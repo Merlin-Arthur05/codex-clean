@@ -1,29 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Codex cache/log full cleaner (v1.2.1) — i18n + age filter + rich JSON.
+"""Clean regenerable cache/log/WAL files under ~/.codex (strict whitelist, confirm before clean).
 
-Safely cleans regenerable cache/log/WAL files under ~/.codex, using a strict
-whitelist and a confirm-before-clean workflow. Protected data (conversations,
-state DBs, config, executables, user projects) is NEVER touched.
+Protected data (conversations, state DBs, config, executables, projects) is never touched.
+Targets: delete .tmp/tmp/plugins/cache (age-filterable), VACUUM + WAL checkpoint on the
+SQLite DBs, and opt-in rebuild of an oversized logs_2.sqlite.
 
-Cleanable targets (each confirmed before running):
-  A. Delete (regenerable):  .tmp / tmp / plugins/cache  (optionally age-filtered)
-  B. VACUUM shrink log DB:   logs_2.sqlite (space reclaimed, data kept)
-  C. WAL/SHM checkpoint:     merge & truncate sqlite WAL files
-  D. Rebuild oversized log DB: back up then recreate (>100 MB, opt-in)
-
-Usage:
-  python codex_clean.py --scan [--lang zh|en|auto]     # read-only scan (default)
-  python codex_clean.py --scan --age 7                 # only count files >7 days old
-  python codex_clean.py --clean                        # interactive confirm
-  python codex_clean.py --clean --yes --age 7           # non-interactive, age-filtered
-  python codex_clean.py --clean --yes --vacuum          # also VACUUM the DBs
-  python codex_clean.py --scan --json                   # machine-readable (per-item plan)
-  python codex_clean.py --clean --yes --json            # JSON report (estimated vs actual)
-
-Language detection order: --lang > CODEX_CLEAN_LANG > LANG/LC_ALL > OS UI lang > en.
-Exit codes: 0 success; 2 bad args.
+Usage: codex_clean.py [--scan | --clean] [--age N] [--vacuum] [--rebuild-logs]
+                      [--json] [--lang en|zh|auto] [--yes]
+Lang order: --lang > CODEX_CLEAN_LANG > LANG/LC_ALL > OS UI lang > en.
+Exit codes: 0 ok, 2 bad args.
 """
 from __future__ import annotations
 
@@ -40,7 +26,7 @@ CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
 # Single source of truth: keep in sync with the GitHub Release tag (v1.2.1).
 VERSION = "1.2.1"
 
-# ---------------------------------------------------------------- i18n ----
+# i18n
 _MSGS = {
     "en": {
         "prog.desc": "Codex cache/log cleaner v{v}",
@@ -176,11 +162,7 @@ def _detect_sys_lang() -> str:
 
 
 def _pre_scan_lang(argv: list[str]) -> str:
-    """Peek the requested language before argparse builds its localized help text.
-
-    Without this the parser description/helps would always render in the default
-    language, because argparse builds them before we can read args.lang.
-    """
+    """Read the requested language before argparse builds its localized help text."""
     for i, a in enumerate(argv):
         if a == "--lang" and i + 1 < len(argv):
             return argv[i + 1]
@@ -201,7 +183,7 @@ def _resolve_lang(lang_arg: str) -> str:
     return _detect_sys_lang()
 
 
-# ------------------------------------------------------- target lists -----
+# Targets
 DELETABLE = [
     ("tmp", CODEX_HOME / ".tmp", "desc.tmp"),
     ("tmp2", CODEX_HOME / "tmp", "desc.tmp2"),
@@ -226,7 +208,7 @@ PROTECTED = [
 LOGS_REBUILD_MB = 100
 
 
-# ------------------------------------------------------------- helpers ----
+# Helpers
 def _size_of(p: Path) -> int:
     if not p.exists():
         return 0
@@ -265,8 +247,7 @@ def _db_sizes(db_path: Path) -> tuple[int, int, int]:
 
 
 def _age_stats(root: Path, days: float) -> tuple[int, int, int, int]:
-    """Return (eligible_bytes, eligible_count, total_bytes, total_count) for files
-    whose mtime is older than `days`. days<=0 means no filter (all eligible)."""
+    """Return (eligible_bytes, eligible_count, total_bytes, total_count); days<=0 = no filter."""
     if not root.exists():
         return 0, 0, 0, 0
     cutoff = time.time() - days * 86400 if days > 0 else None
@@ -358,8 +339,7 @@ def scan(age_days: int = 0):
 def vacuum_db(db_path: Path) -> tuple[bool, str, int]:
     """VACUUM + WAL checkpoint. Returns (ok, message, reclaimed_bytes).
 
-    reclaimed_bytes is measured as the real size difference (main + wal + shm)
-    before vs after, so the JSON report can compare estimate against reality.
+    reclaimed_bytes is the measured before/after size delta (main + wal + shm).
     """
     if not db_path.exists():
         return False, _t("db.notexists"), 0
@@ -446,11 +426,10 @@ def rebuild_logs(db_path: Path) -> tuple[bool, str]:
         return False, _t("rebuild_fail", err=e)
 
 
-# ----------------------------------------------------------------- main ----
+# CLI
 def main():
     global _LANG, _AGE_DAYS
-    # Resolve the language *before* building the parser so its description and
-    # per-argument help text are localized too.
+    # Resolve language before building the parser so --help is localized too.
     _LANG = _resolve_lang(_pre_scan_lang(sys.argv))
     ap = argparse.ArgumentParser(description=_t("prog.desc", v=VERSION))
     ap.add_argument("--scan", action="store_true", help=_t("arg.scan"))
@@ -491,7 +470,7 @@ def main():
         print(_t("scan.hint2"))
         return 0
 
-    # ---- cleanup mode ----
+    # --- cleanup ---
     allow_vacuum = args.vacuum
     allow_rebuild = args.rebuild_logs
 

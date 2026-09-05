@@ -10,7 +10,7 @@
 
 `codex-clean` 只针对 `~/.codex` 内部**可再生的、Codex 自己产生**的数据：插件的临时下载、插件缓存、诊断日志库 `logs_2.sqlite` 及其预写日志（WAL），以及通过 `VACUUM` 回收的状态库空洞。对话历史、状态数据、登录凭证、配置文件和 Codex 可执行文件**一律不碰**。
 
-> 同时打包为 [Codex Agent Skill](#安装为-codex-技能)：在 Codex 里说一句"清理 Codex 缓存"，它会自动扫描 → 向你确认 → 再清理。
+> 同时打包为 [Codex Agent Skill](#安装为-codex-技能)（提供[英文](SKILL.md)与[简体中文](SKILL.zh-CN.md)两版）：在 Codex 里说一句"清理 Codex 缓存"，它会自动扫描 → 向你确认 → 再清理。
 
 ---
 
@@ -161,7 +161,7 @@ VACUUM 的 `actual_bytes` 是**实测收缩量**（`VACUUM` 前后主库 + WAL +
 
 ```bash
 mkdir -p ~/.codex/skills/codex-clean
-cp SKILL.md ~/.codex/skills/codex-clean/
+cp SKILL.zh-CN.md ~/.codex/skills/codex-clean/   # 或 SKILL.md 英文版
 cp -r scripts ~/.codex/skills/codex-clean/
 ```
 
@@ -170,12 +170,18 @@ cp -r scripts ~/.codex/skills/codex-clean/
 ## 路线图
 
 - WAL 增长看护（定期扫描提醒）。
-- **多 agent 支持**：把清理目标扩展到其他 AI 编程 CLI，首个是 `pi`
-  （[@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)）
-  ——探测其数据/缓存/日志目录（如 `~/.pi`），套用同一套"扫描-确认-清理 + 保护清单"规则。
-  见 [项目看板](https://github.com/users/Merlin-Arthur05/projects/3)。
 - 可选的 Windows 计划任务自集成（严格 opt-in）。
 - `--exclude` 跳过指定数据库。
+- **多 agent 支持**——把清理目标扩展到其他 AI 编程 CLI，套用同一套"扫描-确认-清理 + 保护清单"规则：
+  - **pi**（[@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)）
+    ——探测其数据/缓存/日志目录（如 `~/.pi`）。见 [#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)。
+  - **opencode**（[anomalyco/opencode](https://github.com/anomalyco/opencode)）——其 XDG
+    数据/日志/缓存目录，以及 WAL 模式的 `opencode.db`（Linux 下为
+    `~/.local/share/opencode/opencode.db`）。见 [#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)。
+  - 把清理目标重构为**按 agent 组织的注册表**，新增 agent 只需加一条规格。见
+    [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11)。
+
+以上均跟踪于 [项目看板](https://github.com/users/Merlin-Arthur05/projects/3)。
 
 ## 许可
 
@@ -183,4 +189,4 @@ cp -r scripts ~/.codex/skills/codex-clean/
 
 ## 贡献
 
-见 [CONTRIBUTING.md](CONTRIBUTING.md)。欢迎 PR——但安全契约是硬红线：不引入破坏性默认值、受保护项必须始终受保护、只用标准库。
+见 [CONTRIBUTING.md](CONTRIBUTING.zh-CN.md)（[English](CONTRIBUTING.md)）。欢迎 PR——但安全契约是硬红线：不引入破坏性默认值、受保护项必须始终受保护、只用标准库。

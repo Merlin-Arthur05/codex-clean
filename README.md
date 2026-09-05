@@ -10,7 +10,7 @@
 
 `codex-clean` targets only the regenerable, self-produced data inside `~/.codex` that grows over time (temporary plugin downloads, plugin cache, the diagnostic `logs_2.sqlite` database and its write-ahead-log, plus bloat in state databases via `VACUUM`). Conversation history, state data, authentication, configuration, and Codex executables are **never** touched.
 
-> Also packaged as a [Codex Agent Skill](#install-as-a-codex-skill): say *"clean Codex cache"* in Codex and it runs scan-confirm-clean for you.
+> Also packaged as a [Codex Agent Skill](#install-as-a-codex-skill) (available in [English](SKILL.md) and [简体中文](SKILL.zh-CN.md)): say *"clean Codex cache"* in Codex and it runs scan-confirm-clean for you.
 
 ---
 
@@ -172,7 +172,7 @@ stable `name`/`kind` keys for machine parsing.
 
 ```bash
 mkdir -p ~/.codex/skills/codex-clean
-cp SKILL.md ~/.codex/skills/codex-clean/
+cp SKILL.md ~/.codex/skills/codex-clean/   # or SKILL.zh-CN.md for the Chinese version
 cp -r scripts ~/.codex/skills/codex-clean/
 ```
 
@@ -182,11 +182,18 @@ Then in Codex just say: **"清理 Codex 缓存"** / **"Codex 日志太多"** / *
 
 - Automatic WAL-growth watchdog suggestion (periodic scan reminder).
 - Optional integration as a Windows scheduled task (opt-in only).
-- **Multi-agent support**: extend cleanup targets to other AI coding CLIs, starting
-  with `pi` ([@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent))
-  — detect its data/cache/log directories (e.g. `~/.pi` / XDG paths) and apply the
-  same scan-confirm-clean + protected-list rules. Tracked in
-  [project](https://github.com/users/Merlin-Arthur05/projects/3).
+- `--exclude` to skip specific databases.
+- **Multi-agent support** — extend cleanup targets to other AI coding CLIs, applying the
+  same scan-confirm-clean + protected-list rules:
+  - **pi** ([@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent))
+    — detect its data/cache/log directories (e.g. `~/.pi`). Tracked in [#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10).
+  - **opencode** ([anomalyco/opencode](https://github.com/anomalyco/opencode)) — its XDG
+    data/log/cache directories plus the WAL-mode `opencode.db`
+    (`~/.local/share/opencode/opencode.db` on Linux). Tracked in [#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12).
+  - Refactor cleanup targets into a **per-agent registry** so adding an agent needs only
+    one spec entry. Tracked in [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11).
+
+All tracked on the [project board](https://github.com/users/Merlin-Arthur05/projects/3).
 
 ## License
 
@@ -194,4 +201,4 @@ Then in Codex just say: **"清理 Codex 缓存"** / **"Codex 日志太多"** / *
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). PRs welcome — but the safety contract is strict: never add destructive defaults, keep protected items protected, stay stdlib-only.
+See [CONTRIBUTING.md](CONTRIBUTING.md) ([简体中文](CONTRIBUTING.zh-CN.md)). PRs welcome — but the safety contract is strict: never add destructive defaults, keep protected items protected, stay stdlib-only.
