@@ -141,3 +141,31 @@ JSON 契约未变、年龄过滤、精确释放 100KB、VACUUM 实测回收 2.0M
 写 Python 脚本时，路径字符串里的 `WorkBuddy` 被改写成了 `.workbuddy`
 （`C:\\Users\\27385\\.workbuddy\\2026-09-02-14-21-35\\...`），导致 `FileNotFoundError`。
 **规避：脚本内路径一律用正斜杠**（Windows 完全接受），可彻底避免反斜杠被改写。
+
+
+## 2026-09-06 规划：新增 Claude Code 支持（仅规划，不改代码）
+
+按用户要求**本轮只做规划**（建 issue + 挂里程碑 + 更新文档），代码留到下一次迭代；
+Claude Code 支持包含**两项**：清理目标 + Claude Code 技能。
+
+### 先核实再动手（避免基于错误前提开发）
+核对发现需求描述中几项与项目现状不符，已向用户确认方向：
+- 项目**零 Claude 引用**；**无配置生成/加载逻辑**（脚本只读两个环境变量，不生成任何配置文件）；
+  **无 tests/ 目录**。故"配置生成与加载""测试用例"在当时无可改对象。
+- 目标目前是**硬编码单 Agent**（`CODEX_HOME` 全局常量），多 Agent 注册表仍是未实现的 #11。
+
+### 核实到的 Claude Code 事实
+- 真实 `~/.claude` 布局（只读列出，共 20.4 MB）：`plugins/` 10.0MB、`skills/` 9.9MB（均须保护）、
+  `cache/` 0.4MB（可清）、`projects/`（JSONL 会话，须保护）、`memory/`、`settings.json`、
+  `config.json`、`~/.claude.json`、`backups/`、`sessions/`、`ide/`、`history.jsonl`。
+- **无 SQLite** → VACUUM / WAL checkpoint / 日志库重建**均不适用**，这是与 Codex 的关键能力差异。
+- Claude Code 技能遵循 **Agent Skills 开放标准**，与 Codex 的 SKILL.md 同格式
+  → 可共用同一份 SKILL.md 主体，仅 frontmatter 与安装路径不同
+  （`~/.claude/skills/codex-clean/SKILL.md`，目录名即 `/codex-clean` 命令；
+  需 `allowed-tools: Bash, Read`）。
+
+### 产出
+- Issue **#13**（`~/.claude` 清理目标，含保护/可清清单与能力开关设计）、
+  Issue **#14**（作为 Claude Code 技能/斜杠命令发布），均挂 Milestone **v1.3.0**。
+- 两份 README 的 Supported agents 表与路线图补入 Claude Code；CHANGELOG 记录规划。
+- **未改代码、未升版本**（`VERSION` 仍 1.2.1）。
