@@ -23,6 +23,7 @@
 | **OpenAI Codex** | 当前已支持 | `~/.codex` 缓存、日志、WAL 及状态库空洞 |
 | **pi** - [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | 规划中 - v1.3.0（[#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)） | `~/.pi` 数据 / 缓存 / 日志 |
 | **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | 规划中 - v1.3.0（[#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)） | XDG 数据 / 日志 / 缓存 + WAL 模式的 `opencode.db` |
+| **Claude Code** | 规划中 - v1.3.0（[#13](https://github.com/Merlin-Arthur05/codex-clean/issues/13)） | `~/.claude` 缓存 / 日志（JSONL 数据，非 SQLite，因此不适用 VACUUM） |
 
 把清理目标重构为"按 Agent 注册表"、新增 Agent 只需一条规格的改动见 [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11)；详见[路线图](#路线图)。
 
@@ -190,6 +191,7 @@ cp -r scripts ~/.codex/skills/codex-clean/
   - **opencode**（[anomalyco/opencode](https://github.com/anomalyco/opencode)）——其 XDG
     数据/日志/缓存目录，以及 WAL 模式的 `opencode.db`（Linux 下为
     `~/.local/share/opencode/opencode.db`）。见 [#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)。
+  - **Claude Code**——`~/.claude` 缓存与日志。会话以 **JSONL 而非 SQLite** 存储，故 VACUUM / 日志库重建不适用，改由按 agent 的能力开关控制而非硬编码分支；同时将以 `/codex-clean` 斜杠命令形式提供（[#14](https://github.com/Merlin-Arthur05/codex-clean/issues/14)）。见 [#13](https://github.com/Merlin-Arthur05/codex-clean/issues/13)。
   - 把清理目标重构为**按 agent 组织的注册表**，新增 agent 只需加一条规格。见
     [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11)。
 
