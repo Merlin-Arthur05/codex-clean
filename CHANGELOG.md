@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **opencode support scheduled**: new issues #12 (opencode cleanup targets, with
   every path verified against the `anomalyco/opencode` source) and #11 (refactor
   cleanup targets into a per-agent registry), both under Milestone v1.3.0.
+- **Claude Code support scheduled**: new issues #13 (`~/.claude` cleanup target) and #14 (ship as a `/codex-clean` Claude Code skill / slash command), both under Milestone v1.3.0. Verified against a live `~/.claude` install: data is JSONL rather than SQLite, so VACUUM and log-DB rebuild do not apply - these become per-agent capability flags, not hardcoded branches. Planning only; no code or version change in this entry.
 - The project board now carries a bilingual README documenting the versioning
   rules, the milestones, and the safety contract.
 
