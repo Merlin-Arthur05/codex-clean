@@ -23,6 +23,7 @@
 | **OpenAI Codex** | Supported (current) | `~/.codex` cache, logs, WAL, and state-DB bloat |
 | **pi** - [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | Planned - v1.3.0 ([#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)) | `~/.pi` data / cache / logs |
 | **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | Planned - v1.3.0 ([#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)) | XDG data / log / cache + WAL-mode `opencode.db` |
+| **Claude Code** | Planned - v1.3.0 ([#13](https://github.com/Merlin-Arthur05/codex-clean/issues/13)) | `~/.claude` cache / logs (JSONL data - no SQLite, so VACUUM does not apply) |
 
 The per-agent registry refactor that makes adding an agent a one-line spec is tracked in [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11); see [Roadmap](#roadmap--ideas).
 ## Not a generic computer cleaner
@@ -201,6 +202,7 @@ Then in Codex just say: **"清理 Codex 缓存"** / **"Codex 日志太多"** / *
   - **opencode** ([anomalyco/opencode](https://github.com/anomalyco/opencode)) — its XDG
     data/log/cache directories plus the WAL-mode `opencode.db`
     (`~/.local/share/opencode/opencode.db` on Linux). Tracked in [#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12).
+  - **Claude Code** - `~/.claude` cache and logs. Conversations are stored as **JSONL, not SQLite**, so VACUUM / log-DB rebuild do not apply; these become per-agent capability flags rather than hardcoded branches. Also ships as a `/codex-clean` slash command ([#14](https://github.com/Merlin-Arthur05/codex-clean/issues/14)). Tracked in [#13](https://github.com/Merlin-Arthur05/codex-clean/issues/13).
   - Refactor cleanup targets into a **per-agent registry** so adding an agent needs only
     one spec entry. Tracked in [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11).
 
