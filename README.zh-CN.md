@@ -240,6 +240,14 @@ cp -r scripts ~/.claude/skills/codex-clean/
 
 以上均跟踪于 [项目看板](https://github.com/users/Merlin-Arthur05/projects/3)。
 
+## 测试
+
+```bash
+python tests/test_codex_clean.py   # 28 项回归检查, 仅用标准库
+```
+
+测试通过 `CODEX_HOME` / `CLAUDE_HOME` 指向临时目录, 永远不会触碰真实的 agent 数据目录。
+
 ## 许可
 
 [MIT](LICENSE) © Merlin-Arthur05
