@@ -21,9 +21,9 @@
 | Agent | Status | What gets cleaned |
 |---|---|---|
 | **OpenAI Codex** | Supported (current) | `~/.codex` cache, logs, WAL, and state-DB bloat |
-| **pi** - [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | Planned - v1.3.0 ([#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)) | `~/.pi` data / cache / logs |
-| **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | Planned - v1.3.0 ([#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)) | XDG data / log / cache + WAL-mode `opencode.db` |
-| **Claude Code** | Planned - v1.3.0 ([#13](https://github.com/Merlin-Arthur05/codex-clean/issues/13)) | `~/.claude` cache / logs (JSONL data - no SQLite, so VACUUM does not apply) |
+| **pi** - [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | Planned - v1.4.0 ([#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)) | `~/.pi` data / cache / logs |
+| **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | Planned - v1.4.0 ([#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)) | XDG data / log / cache + WAL-mode `opencode.db` |
+| **Claude Code** | Supported (current) | `~/.claude` cache / logs (JSONL data - no SQLite, so VACUUM does not apply) |
 
 The per-agent registry refactor that makes adding an agent a one-line spec is tracked in [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11); see [Roadmap](#roadmap--ideas).
 ## Not a generic computer cleaner
@@ -76,6 +76,30 @@ Codex (CLI/Desktop) keeps several things under `~/.codex` that grow without boun
 - Config: `config.toml`, `auth.json`, `model-catalogs/`, `backups/`
 - Your project files & work directories
 
+## Multi-agent targets
+
+One codebase, one scan -> confirm -> clean flow. Each agent is a single entry in the
+`AGENTS` registry inside the script, so differences are **data, not branches**:
+
+| | Codex (default) | Claude Code |
+|---|---|---|
+| Data directory | `~/.codex` (override `CODEX_HOME`) | `~/.claude` (override `CLAUDE_HOME`) |
+| Data format | SQLite (+ WAL/SHM) | JSONL / plain files |
+| VACUUM + WAL cleanup | yes | **not applicable** (no SQLite) |
+| Oversized log-DB rebuild | yes | **not applicable** |
+| How to select | default | `--target claude-code` |
+
+What each agent may touch (strict whitelist, everything else is protected):
+
+- **Codex** — cleans `.tmp/`, `tmp/`, `plugins/cache/`; VACUUMs the six SQLite DBs.
+  Protects `sessions/`, `config.toml`, `auth.json`, `skills/`, `rules/`, `backups/`.
+- **Claude Code** — cleans `cache/`, `debug/`, `shell-snapshots/`, `statsig/`.
+  Protects `projects/` (your conversations), `memory/`, `plugins/`, `skills/`,
+  `settings.json`, `config.json`, `sessions/`, `ide/`, `history.jsonl`.
+
+> Because Claude Code stores conversations as JSONL, `--vacuum` and `--rebuild-logs`
+> simply do not apply there — the tool tells you so instead of failing.
+
 ## Install
 
 ```bash
@@ -116,6 +140,10 @@ python scripts/codex_clean.py --clean --yes --vacuum --json
 
 # 9. Choose output language: en | zh | auto (default)
 python scripts/codex_clean.py --scan --lang zh
+
+# 10. Clean a different agent (Claude Code)
+python scripts/codex_clean.py --scan --target claude-code
+python scripts/codex_clean.py --clean --yes --target claude-code
 ```
 
 ### `--age N` — filter by file age
@@ -155,7 +183,7 @@ wipe an entire cache, and it avoids deleting files Codex may be actively using.
 
 ```jsonc
 {
-  "ok": true, "dry_run": false, "version": "1.2.0",
+  "ok": true, "dry_run": false, "version": "1.3.0",
   "estimated_bytes": 215040, "actual_freed_bytes": 204800, "delta_bytes": -10240,
   "items": [
     { "name": "tmp", "kind": "delete", "status": "ok",
@@ -189,6 +217,22 @@ cp -r scripts ~/.codex/skills/codex-clean/
 ```
 
 Then in Codex just say: **"清理 Codex 缓存"** / **"Codex 日志太多"** / **"Codex 占空间"** / **"clean Codex cache"** — it will read the skill, scan, and confirm with you before cleaning.
+
+## Install as a Claude Code skill
+
+Claude Code follows the **Agent Skills open standard** — the same format used here — so the
+same `SKILL.md` body works; only the location and frontmatter differ:
+
+```bash
+mkdir -p ~/.claude/skills/codex-clean
+cp SKILL.md ~/.claude/skills/codex-clean/   # or SKILL.zh-CN.md for Chinese
+cp -r scripts ~/.claude/skills/codex-clean/
+```
+
+The **directory name becomes the slash command**, so type **`/codex-clean`** (or just ask
+*"clean my agent cache"*) in Claude Code. Add `allowed-tools: Bash, Read` to the SKILL.md
+frontmatter so it can run the script without an approval prompt.
+
 
 ## Roadmap / Ideas
 
