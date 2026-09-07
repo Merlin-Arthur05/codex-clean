@@ -22,8 +22,9 @@
 |---|---|---|
 | **OpenAI Codex** | 当前已支持 | `~/.codex` 缓存、日志、WAL 及状态库空洞 |
 | **pi** - [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | 规划中 - v1.4.0（[#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)） | `~/.pi` 数据 / 缓存 / 日志 |
-| **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | 规划中 - v1.4.0（[#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)） | XDG 数据 / 日志 / 缓存 + WAL 模式的 `opencode.db` |
-| **Claude Code** | 当前已支持 | `~/.claude` 缓存 / 日志（JSONL 数据，非 SQLite，因此不适用 VACUUM） |
+| **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | 规划中 - v1.5.0（[#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)） | XDG 数据 / 日志 / 缓存 + WAL 模式的 `opencode.db` |
+| **Claude Code** | 当前已支持 |
+| **Pi** | 当前已支持 | `~/.pi/agent` 缓存 / 临时 / 日志（尽力而为；官方未记载缓存） | `~/.claude` 缓存 / 日志（JSONL 数据，非 SQLite，因此不适用 VACUUM） |
 
 把清理目标重构为"按 Agent 注册表"、新增 Agent 只需一条规格的改动见 [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11)；详见[路线图](#路线图)。
 
@@ -79,13 +80,14 @@ Codex（CLI / 桌面版）在 `~/.codex` 下有几样东西会无上限增长：
 同一套代码、同一套"扫描 → 确认 → 清理"流程。每个 agent 在脚本的 `AGENTS` 注册表里只占一条记录，
 因此差异是**数据而非分支**：
 
-| | Codex（默认） | Claude Code |
-|---|---|---|
-| 数据目录 | `~/.codex`（可用 `CODEX_HOME` 覆盖） | `~/.claude`（可用 `CLAUDE_HOME` 覆盖） |
-| 数据格式 | SQLite（+ WAL/SHM） | JSONL / 普通文件 |
-| VACUUM + WAL 清理 | 支持 | **不适用**（无 SQLite） |
-| 超大日志库重建 | 支持 | **不适用** |
-| 如何选择 | 默认 | `--target claude-code` |
+| | Codex（默认） | Claude Code | Pi |
+|---|---|---|---|
+| 包 | OpenAI Codex | Claude Code | `@earendil-works/pi-coding-agent` |
+| 数据目录 | `~/.codex`（`CODEX_HOME`） | `~/.claude`（`CLAUDE_HOME`） | `~/.pi/agent`（`PI_AGENT_HOME`） |
+| 数据格式 | SQLite（+ WAL/SHM） | JSONL / 普通文件 | JSONL / 普通文件 |
+| VACUUM + WAL 清理 | 支持（6 个已知库） | 自动发现 | 自动发现 |
+| 超大日志库重建 | 支持 | **不适用** | **不适用** |
+| 如何选择 | 默认 | `--target claude-code` | `--target pi` |
 
 每个 agent 可清理的范围（严格白名单，其余一律保护）：
 
@@ -94,9 +96,25 @@ Codex（CLI / 桌面版）在 `~/.codex` 下有几样东西会无上限增长：
 - **Claude Code** ——清理 `cache/`、`debug/`、`shell-snapshots/`、`statsig/`。
   保护 `projects/`（你的对话）、`memory/`、`plugins/`、`skills/`、
   `settings.json`、`config.json`、`sessions/`、`ide/`、`history.jsonl`。
+- **Pi** ——清理 `cache/`、`tmp/`、`logs/`。
+  保护 `sessions/`（对话）、`skills/`、`npm/`（**用户已安装的包**）、
+  `settings.json`、`trust.json`、`auth.json`、`AGENTS.md`、`SYSTEM.md`。
 
-> Claude Code 的会话是 JSONL，所以 `--vacuum` / `--rebuild-logs` 对它不适用——
-> 工具会明确提示，而不是报错。
+### 已知限制
+
+以下是这些 agent 自身的客观约束，经核实确认，并非本工具的能力缺失。
+
+- **`--rebuild-logs`（Claude Code、Pi）**——不适用。两者都没有"超大诊断日志库"这一概念；
+  它们的日志是普通文件（Claude 为 `debug/`，Pi 为 `logs/`），已在删除白名单中，
+  因此没有可重建的数据库。该参数会打印"不适用"提示，而不是报错。
+- **`--vacuum`（Claude Code、Pi）**——**并非**被硬编码为不支持。两者都不声明固定的库清单，
+  而是由扫描时自动发现家目录下的 `*.sqlite` / `*.sqlite3` / `*.db`。
+  当前核实结果：`~/.claude` 下为 0 个此类文件，因此无可收缩对象，参数会提示"不适用"。
+  若将来版本引入数据库，VACUUM 会**自动生效，无需改代码**。
+- **Pi 的可清理项是"尽力而为"**。官方文档只记载了 `~/.pi/agent` 下的用户数据
+  （`sessions/`、`skills/`、`npm/` 为用户安装包，以及配置文件）。
+  `cache/` / `tmp/` / `logs/` 因其普遍可再生而纳入，且**仅当实际存在时**才会处理；
+  保护清单确保用户数据绝不会被碰。核实环境未安装 Pi，故此清单刻意保守。
 
 ## 安装
 
