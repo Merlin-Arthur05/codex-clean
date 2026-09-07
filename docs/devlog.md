@@ -198,3 +198,31 @@ Claude Code 支持包含**两项**：清理目标 + Claude Code 技能。
 - 真机只读扫描：真实 `~/.codex`（79.0 MB tmp 等）与真实 `~/.claude`（418.7 KB cache）均正常。
 - 修掉两处自引入的显示问题：扫描标题写死 "Codex"（改为按 agent 标签）、
   名称列 14 宽导致 `claude-shell-snapshots` 排版错位（改为 24 宽）。
+
+
+## v1.4.0（2026-09-07）：新增 Pi 支持 + 补齐/澄清 Claude 的能力限制
+
+### 1. 新增 Pi（Issue #10）
+- 路径**从官方源码核实**（`earendil-works/pi` → `packages/coding-agent/docs/settings.md`）：
+  家目录 `~/.pi/agent`，含 `sessions/`、`skills/`、`npm/`、`settings.json`、`trust.json`、
+  `auth.json`、`AGENTS.md`、`SYSTEM.md`。
+- **关键判断**：文档原文 "User installs go under `~/.pi/agent/npm/`" → `npm/` 是
+  **用户已安装的包**，删掉等于卸载扩展，因此列入**保护**而非清理。
+- 可清理项 `cache/`/`tmp/`/`logs/`：官方未记载缓存，属"尽力而为"，仅当存在时处理
+  （缺失目录报 exists=false，不创建、不假设）。Pi 未装在核实环境，故刻意保守。
+
+### 2. 逐项梳理 Claude 被标记为"不支持"的能力
+| 能力 | 原状态 | 处理 |
+|---|---|---|
+| `--vacuum` | 硬编码 `capabilities.vacuum=False` | **改为数据驱动**：`discover_dbs=True`，扫描时自动发现 sqlite；当前 `~/.claude` 实测 0 个 → 提示"不适用"，未来有库自动生效 |
+| `--rebuild-logs` | 标记不适用 | **确属不适用**：无"超大诊断日志库"概念，日志是 `debug/` 普通文件且已在删除白名单 → 代码注释 + README 明确标注原因 |
+| `--age N` | 未文档化但实际可用 | 补测试 T33 确认对非 Codex agent 同样生效 |
+
+### 3. 限制说明落点
+- 代码：`AGENTS` 注册表上方新增 **LIMITATIONS 注释块**，写明两项限制及原因。
+- 文档：两份 README 新增 **Known limitations / 已知限制** 小节。
+
+### 4. 验证
+- 测试从 28 项扩到 **38/38 通过**，新增 Pi 目标、Pi 保护项（`npm/` 等）存活、
+  **sqlite 自动发现后生成 vacuum 项且"不适用"提示消失**（证明非硬编码）、
+  `--age` 对 Claude 生效、`--target` 列出三个 agent。
