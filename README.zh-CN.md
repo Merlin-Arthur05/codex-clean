@@ -21,9 +21,9 @@
 | Agent | 状态 | 清理内容 |
 |---|---|---|
 | **OpenAI Codex** | 当前已支持 | `~/.codex` 缓存、日志、WAL 及状态库空洞 |
-| **pi** - [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | 规划中 - v1.3.0（[#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)） | `~/.pi` 数据 / 缓存 / 日志 |
-| **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | 规划中 - v1.3.0（[#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)） | XDG 数据 / 日志 / 缓存 + WAL 模式的 `opencode.db` |
-| **Claude Code** | 规划中 - v1.3.0（[#13](https://github.com/Merlin-Arthur05/codex-clean/issues/13)） | `~/.claude` 缓存 / 日志（JSONL 数据，非 SQLite，因此不适用 VACUUM） |
+| **pi** - [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | 规划中 - v1.4.0（[#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)） | `~/.pi` 数据 / 缓存 / 日志 |
+| **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | 规划中 - v1.4.0（[#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)） | XDG 数据 / 日志 / 缓存 + WAL 模式的 `opencode.db` |
+| **Claude Code** | 当前已支持 | `~/.claude` 缓存 / 日志（JSONL 数据，非 SQLite，因此不适用 VACUUM） |
 
 把清理目标重构为"按 Agent 注册表"、新增 Agent 只需一条规格的改动见 [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11)；详见[路线图](#路线图)。
 
@@ -74,6 +74,30 @@ Codex（CLI / 桌面版）在 `~/.codex` 下有几样东西会无上限增长：
 - 配置：`config.toml`、`auth.json`、`model-catalogs/`、`backups/`
 - 你的项目文件与工作目录
 
+## 多 Agent 目标
+
+同一套代码、同一套"扫描 → 确认 → 清理"流程。每个 agent 在脚本的 `AGENTS` 注册表里只占一条记录，
+因此差异是**数据而非分支**：
+
+| | Codex（默认） | Claude Code |
+|---|---|---|
+| 数据目录 | `~/.codex`（可用 `CODEX_HOME` 覆盖） | `~/.claude`（可用 `CLAUDE_HOME` 覆盖） |
+| 数据格式 | SQLite（+ WAL/SHM） | JSONL / 普通文件 |
+| VACUUM + WAL 清理 | 支持 | **不适用**（无 SQLite） |
+| 超大日志库重建 | 支持 | **不适用** |
+| 如何选择 | 默认 | `--target claude-code` |
+
+每个 agent 可清理的范围（严格白名单，其余一律保护）：
+
+- **Codex** ——清理 `.tmp/`、`tmp/`、`plugins/cache/`；对六个 SQLite 库做 VACUUM。
+  保护 `sessions/`、`config.toml`、`auth.json`、`skills/`、`rules/`、`backups/`。
+- **Claude Code** ——清理 `cache/`、`debug/`、`shell-snapshots/`、`statsig/`。
+  保护 `projects/`（你的对话）、`memory/`、`plugins/`、`skills/`、
+  `settings.json`、`config.json`、`sessions/`、`ide/`、`history.jsonl`。
+
+> Claude Code 的会话是 JSONL，所以 `--vacuum` / `--rebuild-logs` 对它不适用——
+> 工具会明确提示，而不是报错。
+
 ## 安装
 
 ```bash
@@ -114,6 +138,10 @@ python scripts/codex_clean.py --clean --yes --vacuum --json
 
 # 9. 指定输出语言：en | zh | auto（默认自动）
 python scripts/codex_clean.py --scan --lang zh
+
+# 10. 清理其他 agent（Claude Code）
+python scripts/codex_clean.py --scan --target claude-code
+python scripts/codex_clean.py --clean --yes --target claude-code
 ```
 
 ### `--age N` 按文件年龄过滤
@@ -147,7 +175,7 @@ python scripts/codex_clean.py --scan --lang zh
 
 ```jsonc
 {
-  "ok": true, "dry_run": false, "version": "1.2.0",
+  "ok": true, "dry_run": false, "version": "1.3.0",
   "estimated_bytes": 215040, "actual_freed_bytes": 204800, "delta_bytes": -10240,
   "items": [
     { "name": "tmp", "kind": "delete", "status": "ok",
@@ -179,6 +207,21 @@ cp -r scripts ~/.codex/skills/codex-clean/
 ```
 
 之后在 Codex 里直接说：**"清理 Codex 缓存"** / **"Codex 日志太多"** / **"Codex 占空间"** / **"clean Codex cache"** ——它会读取本技能、扫描，并在清理前与你确认。
+
+## 安装为 Claude Code 技能
+
+Claude Code 遵循 **Agent Skills 开放标准**（与本项目 SKILL.md 同格式），因此同一份 SKILL.md 主体
+可直接复用，只有安装位置和 frontmatter 不同：
+
+```bash
+mkdir -p ~/.claude/skills/codex-clean
+cp SKILL.zh-CN.md ~/.claude/skills/codex-clean/   # 或 SKILL.md 英文版
+cp -r scripts ~/.claude/skills/codex-clean/
+```
+
+**目录名即斜杠命令**，所以在 Claude Code 里输入 **`/codex-clean`**（或直接说"清理 agent 缓存"）即可。
+在 SKILL.md 的 frontmatter 加上 `allowed-tools: Bash, Read`，即可免确认执行脚本。
+
 
 ## 路线图
 
