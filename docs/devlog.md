@@ -169,3 +169,32 @@ Claude Code 支持包含**两项**：清理目标 + Claude Code 技能。
   Issue **#14**（作为 Claude Code 技能/斜杠命令发布），均挂 Milestone **v1.3.0**。
 - 两份 README 的 Supported agents 表与路线图补入 Claude Code；CHANGELOG 记录规划。
 - **未改代码、未升版本**（`VERSION` 仍 1.2.1）。
+
+
+## v1.3.0（2026-09-07）：多 Agent 目标注册表 + Claude Code 支持
+
+### 迭代范围（从 Milestone #2 的 8 个 issue 中选定）
+- **#11** per-agent 注册表重构（前置依赖）
+- **#13** Claude Code 清理目标
+- **#14** Claude Code 技能安装文档
+- **#4**  WAL 增长看护提示
+- 延后到 v1.4.0：#5（桌面版运行时缓存）、#6（`--exclude`）、#10（pi）、#12（opencode）。
+  理由：注册表就位后它们都是"加一条 spec"的工作量，但 pi 的目录布局无法在本机核实、
+  opencode 涉及 XDG 跨平台细节，不宜在本轮硬塞。
+
+### 实现要点
+- `AGENTS` 注册表取代了 `DELETABLE` / `SQLITE_DBS` / `PROTECTED` 三个模块级常量；
+  路径改为相对 agent home 的字符串，扫描时解析。
+- `agent_home(target)` 统一解析目录（env 覆盖优先，沿用 `CODEX_HOME` 的模式，Claude 用 `CLAUDE_HOME`）。
+- 能力差异声明式：Claude Code 的 `dbs: []`、`capabilities.vacuum=False`；
+  `--vacuum` / `--rebuild-logs` 对它自动降级为提示而非报错。
+- `scan(age_days, target="codex")`，默认仍是 codex → **旧行为零变化**。
+- 新增 `--target`；JSON 新增 `agent` / `agent_home`（**纯新增字段**，`codex_home` 与所有旧键保留）。
+
+### 验证
+- 自测 **28/28 通过**：含 Codex 向后兼容（目标/项目名/可回收总量/--age）、
+  Claude Code 白名单与保护项存活、无 SQLite 时不产生 vacuum 项、能力降级提示、
+  缺失目录容错、非法 `--target` 退出码 2、中英 `--help`、WAL 提示阈值。
+- 真机只读扫描：真实 `~/.codex`（79.0 MB tmp 等）与真实 `~/.claude`（418.7 KB cache）均正常。
+- 修掉两处自引入的显示问题：扫描标题写死 "Codex"（改为按 agent 标签）、
+  名称列 14 宽导致 `claude-shell-snapshots` 排版错位（改为 24 宽）。
