@@ -22,8 +22,9 @@
 |---|---|---|
 | **OpenAI Codex** | Supported (current) | `~/.codex` cache, logs, WAL, and state-DB bloat |
 | **pi** - [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | Planned - v1.4.0 ([#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)) | `~/.pi` data / cache / logs |
-| **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | Planned - v1.4.0 ([#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)) | XDG data / log / cache + WAL-mode `opencode.db` |
-| **Claude Code** | Supported (current) | `~/.claude` cache / logs (JSONL data - no SQLite, so VACUUM does not apply) |
+| **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | Planned - v1.5.0 ([#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)) | XDG data / log / cache + WAL-mode `opencode.db` |
+| **Claude Code** | Supported (current) |
+| **Pi** | Supported (current) | `~/.pi/agent` cache / tmp / logs (best-effort; no documented cache) | `~/.claude` cache / logs (JSONL data - no SQLite, so VACUUM does not apply) |
 
 The per-agent registry refactor that makes adding an agent a one-line spec is tracked in [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11); see [Roadmap](#roadmap--ideas).
 ## Not a generic computer cleaner
@@ -81,13 +82,14 @@ Codex (CLI/Desktop) keeps several things under `~/.codex` that grow without boun
 One codebase, one scan -> confirm -> clean flow. Each agent is a single entry in the
 `AGENTS` registry inside the script, so differences are **data, not branches**:
 
-| | Codex (default) | Claude Code |
-|---|---|---|
-| Data directory | `~/.codex` (override `CODEX_HOME`) | `~/.claude` (override `CLAUDE_HOME`) |
-| Data format | SQLite (+ WAL/SHM) | JSONL / plain files |
-| VACUUM + WAL cleanup | yes | **not applicable** (no SQLite) |
-| Oversized log-DB rebuild | yes | **not applicable** |
-| How to select | default | `--target claude-code` |
+| | Codex (default) | Claude Code | Pi |
+|---|---|---|---|
+| Package | OpenAI Codex | Claude Code | `@earendil-works/pi-coding-agent` |
+| Data directory | `~/.codex` (`CODEX_HOME`) | `~/.claude` (`CLAUDE_HOME`) | `~/.pi/agent` (`PI_AGENT_HOME`) |
+| Data format | SQLite (+ WAL/SHM) | JSONL / plain files | JSONL / plain files |
+| VACUUM + WAL cleanup | yes (6 known DBs) | auto-discovered | auto-discovered |
+| Oversized log-DB rebuild | yes | **not applicable** | **not applicable** |
+| How to select | default | `--target claude-code` | `--target pi` |
 
 What each agent may touch (strict whitelist, everything else is protected):
 
@@ -96,9 +98,29 @@ What each agent may touch (strict whitelist, everything else is protected):
 - **Claude Code** — cleans `cache/`, `debug/`, `shell-snapshots/`, `statsig/`.
   Protects `projects/` (your conversations), `memory/`, `plugins/`, `skills/`,
   `settings.json`, `config.json`, `sessions/`, `ide/`, `history.jsonl`.
+- **Pi** — cleans `cache/`, `tmp/`, `logs/`.
+  Protects `sessions/` (conversations), `skills/`, `npm/` (**user-installed packages**),
+  `settings.json`, `trust.json`, `auth.json`, `AGENTS.md`, `SYSTEM.md`.
 
-> Because Claude Code stores conversations as JSONL, `--vacuum` and `--rebuild-logs`
-> simply do not apply there — the tool tells you so instead of failing.
+### Known limitations
+
+These are verified constraints of the agents themselves, not gaps in the tool.
+
+- **`--rebuild-logs` (Claude Code, Pi)** — not applicable. Neither agent has an
+  oversized *diagnostic log database*; their logs are plain files (`debug/` for Claude,
+  `logs/` for Pi) that are already in the delete whitelist, so there is nothing to rebuild.
+  The flag prints a "does not apply" note instead of failing.
+- **`--vacuum` (Claude Code, Pi)** — *not* hardcoded as unsupported. Both declare no fixed
+  DB list and let the scan discover `*.sqlite` / `*.sqlite3` / `*.db` in their home.
+  Verified today: zero such files under `~/.claude`, so there is nothing to shrink and the
+  flag reports "does not apply". If a future release ships a database, VACUUM starts
+  working with no code change.
+- **Pi's cleanable set is best-effort.** The official docs describe only user data under
+  `~/.pi/agent` (`sessions/`, `skills/`, `npm/` = user-installed packages, plus settings).
+  `cache/` / `tmp/` / `logs/` are offered because they are universally regenerable and are
+  only touched if they actually exist; the protected list guarantees user data never is.
+  Pi was not installed on the machine used to verify this, so the set is deliberately
+  conservative.
 
 ## Install
 
