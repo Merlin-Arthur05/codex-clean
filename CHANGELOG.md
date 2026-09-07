@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-09-07
+
+### Added
+- **Pi support (#10)**: `--target pi` cleans `~/.pi/agent` (override `PI_AGENT_HOME`).
+  Whitelist: `cache/`, `tmp/`, `logs/` (best-effort, only if present). Protects
+  `sessions/`, `skills/`, `npm/` (user-installed packages), `settings.json`,
+  `trust.json`, `auth.json`, `AGENTS.md`, `SYSTEM.md`. Paths verified against the
+  official docs of `earendil-works/pi`.
+- **SQLite auto-discovery**: agents without a fixed DB list (Claude Code, Pi) now have
+  `*.sqlite` / `*.sqlite3` / `*.db` discovered at runtime, so `--vacuum` is driven by
+  data instead of a hardcoded "unsupported" flag.
+
+### Fixed
+- `--vacuum` on an agent whose home contains no SQLite now reports "does not apply" based
+  on what was actually found, rather than a static per-agent capability.
+
+### Documented
+- Known limitations for Claude Code and Pi (`--rebuild-logs` not applicable; `--vacuum`
+  depends on discovered databases; Pi's cleanable set is best-effort) — recorded both in
+  the README and in a LIMITATIONS comment block next to the `AGENTS` registry.
+
+### Compatibility
+Backward compatible with v1.3.0: default target is still `codex`, all flags and JSON keys
+unchanged, and Codex keeps its explicit six-database list (no behaviour change).
+
+
 ## [1.3.0] - 2026-09-07
 
 ### Added
