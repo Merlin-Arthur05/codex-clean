@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Clean regenerable cache/log/WAL files under ~/.codex (strict whitelist, confirm before clean).
+"""Clean regenerable cache/log/WAL files of AI coding agents (whitelist, confirm before clean).
 
-Protected data (conversations, state DBs, config, executables, projects) is never touched.
-Targets: delete .tmp/tmp/plugins/cache (age-filterable), VACUUM + WAL checkpoint on the
-SQLite DBs, and opt-in rebuild of an oversized logs_2.sqlite.
+Agents live in the AGENTS registry: codex (default) and claude-code. Per-agent
+differences (home path, data format, optional capabilities such as VACUUM) are
+data, not branches. Protected data (conversations, config, projects) is never touched.
 
 Usage: codex_clean.py [--scan | --clean] [--age N] [--vacuum] [--rebuild-logs]
-                      [--json] [--lang en|zh|auto] [--yes]
+                      [--target codex|claude-code] [--json] [--lang en|zh|auto] [--yes]
 Lang order: --lang > CODEX_CLEAN_LANG > LANG/LC_ALL > OS UI lang > en.
 Exit codes: 0 ok, 2 bad args.
 """
@@ -22,16 +22,72 @@ import sys
 import time
 from pathlib import Path
 
-CODEX_HOME = Path(os.environ.get("CODEX_HOME") or Path.home() / ".codex")
-# Single source of truth: keep in sync with the GitHub Release tag (v1.2.1).
-VERSION = "1.2.1"
+# Single source of truth: keep in sync with the GitHub Release tag (v1.3.0).
+VERSION = "1.3.0"
+
+# Per-agent registry. Adding an agent = one entry here; nothing else branches on
+# the agent. Paths are relative to the agent home and resolved at scan time.
+#   deletable   -> (item name, relative path, i18n description key)
+#   dbs         -> (item name, relative path, i18n key); empty = no SQLite at all
+#   capabilities-> optional features that do not apply to every agent
+AGENTS = {
+    "codex": {
+        "label": "Codex",
+        "home_env": "CODEX_HOME",
+        "home_rel": ".codex",
+        "deletable": [
+            ("tmp", ".tmp", "desc.tmp"),
+            ("tmp2", "tmp", "desc.tmp2"),
+            ("plugin-cache", "plugins/cache", "desc.plugin-cache"),
+        ],
+        "dbs": [
+            ("logs-db", "logs_2.sqlite", "desc.logs-db"),
+            ("state-db", "state_5.sqlite", "desc.state-db"),
+            ("threads-db", "thread_history_1.sqlite", "desc.threads-db"),
+            ("queue-db", "queue_1.sqlite", "desc.queue-db"),
+            ("goals-db", "goals_1.sqlite", "desc.goals-db"),
+            ("memories-db", "memories_1.sqlite", "desc.memories-db"),
+        ],
+        "protected": [
+            "sessions", "config.toml", "auth.json", "backups", "backups_state",
+            "cc-switch-model-catalog.json", "rules", "skills",
+        ],
+        "rebuild_db": "logs-db",
+        "capabilities": {"vacuum": True, "rebuild_logs": True},
+    },
+    "claude-code": {
+        "label": "Claude Code",
+        "home_env": "CLAUDE_HOME",
+        "home_rel": ".claude",
+        # Conversations are JSONL, not SQLite: no dbs, so VACUUM/rebuild do not apply.
+        "deletable": [
+            ("claude-cache", "cache", "desc.claude-cache"),
+            ("claude-debug", "debug", "desc.claude-debug"),
+            ("claude-shell-snapshots", "shell-snapshots", "desc.claude-snapshots"),
+            ("claude-statsig", "statsig", "desc.claude-statsig"),
+        ],
+        "dbs": [],
+        "protected": [
+            "projects", "memory", "plugins", "skills", "settings.json", "config.json",
+            "backups", "sessions", "ide", "history.jsonl",
+        ],
+        "rebuild_db": None,
+        "capabilities": {"vacuum": False, "rebuild_logs": False},
+    },
+}
+
+
+def agent_home(target: str) -> Path:
+    """Resolve an agent's data directory (env override wins, mirroring CODEX_HOME)."""
+    spec = AGENTS[target]
+    return Path(os.environ.get(spec["home_env"]) or (Path.home() / spec["home_rel"]))
 
 # i18n
 _MSGS = {
     "en": {
         "prog.desc": "Codex cache/log cleaner v{v}",
-        "scan.title": "=== Codex cleanable items (read-only scan) ===",
-        "scan.codedir": "Codex directory: {path}",
+        "scan.title": "=== {label} cleanable items (read-only scan) ===",
+        "scan.codedir": "{label} directory: {path}",
         "scan.agefilter": "Age filter: only files older than {days} days are counted",
         "scan.reclaim": "Estimated reclaimable: {size}",
         "scan.of_total": "  (DB total {size})",
@@ -81,12 +137,20 @@ _MSGS = {
         "arg.rebuild": "allow rebuilding oversized log DB (with --clean)",
         "arg.lang": "output language (default: auto-detect)",
         "arg.json": "machine-readable output",
+        "arg.target": "which agent's data to clean (default: codex)",
+        "scan.wal_hint": "Hint: WAL totals {size} - consider a periodic --clean --vacuum.",
+        "scan.no_vacuum": "Note: this target has no SQLite databases, so --vacuum does not apply.",
+        "scan.no_rebuild": "Note: this target has no oversized log DB, so --rebuild-logs does not apply.",
+        "desc.claude-cache": "Claude Code cache (regenerable)",
+        "desc.claude-debug": "Claude Code debug logs (regenerable)",
+        "desc.claude-snapshots": "Shell snapshots (regenerable)",
+        "desc.claude-statsig": "Statsig/telemetry cache (regenerable)",
         "json.est_vs_act": "estimated={est} actual={act} delta={delta}",
     },
     "zh": {
         "prog.desc": "Codex 缓存/日志完整清理器 v{v}",
-        "scan.title": "=== Codex 可清理项(只读扫描) ===",
-        "scan.codedir": "Codex 目录: {path}",
+        "scan.title": "=== {label} 可清理项(只读扫描) ===",
+        "scan.codedir": "{label} 目录: {path}",
         "scan.agefilter": "年龄过滤: 仅统计超过 {days} 天的文件",
         "scan.reclaim": "预计可回收: {size}",
         "scan.of_total": "  (库总 {size})",
@@ -136,6 +200,14 @@ _MSGS = {
         "arg.rebuild": "允许重建超大日志库 (配合 --clean)",
         "arg.lang": "输出语言(默认自动检测)",
         "arg.json": "机器可读输出",
+        "arg.target": "要清理哪个 agent 的数据(默认: codex)",
+        "scan.wal_hint": "提示: WAL 合计 {size}, 建议定期执行 --clean --vacuum。",
+        "scan.no_vacuum": "说明: 该目标没有 SQLite 数据库, --vacuum 不适用。",
+        "scan.no_rebuild": "说明: 该目标没有超大日志库, --rebuild-logs 不适用。",
+        "desc.claude-cache": "Claude Code 缓存(可再生)",
+        "desc.claude-debug": "Claude Code 调试日志(可再生)",
+        "desc.claude-snapshots": "Shell 快照(可再生)",
+        "desc.claude-statsig": "Statsig/遥测缓存(可再生)",
         "json.est_vs_act": "预估={est} 实际={act} 差值={delta}",
     },
 }
@@ -185,29 +257,12 @@ def _resolve_lang(lang_arg: str) -> str:
     return _detect_sys_lang()
 
 
-# Targets
-DELETABLE = [
-    ("tmp", CODEX_HOME / ".tmp", "desc.tmp"),
-    ("tmp2", CODEX_HOME / "tmp", "desc.tmp2"),
-    ("plugin-cache", CODEX_HOME / "plugins" / "cache", "desc.plugin-cache"),
-]
-
-SQLITE_DBS = [
-    ("logs-db", CODEX_HOME / "logs_2.sqlite", "desc.logs-db"),
-    ("state-db", CODEX_HOME / "state_5.sqlite", "desc.state-db"),
-    ("threads-db", CODEX_HOME / "thread_history_1.sqlite", "desc.threads-db"),
-    ("queue-db", CODEX_HOME / "queue_1.sqlite", "desc.queue-db"),
-    ("goals-db", CODEX_HOME / "goals_1.sqlite", "desc.goals-db"),
-    ("memories-db", CODEX_HOME / "memories_1.sqlite", "desc.memories-db"),
-]
-
-# Never touched, asserted in JSON output for auditability.
-PROTECTED = [
-    "sessions", "config.toml", "auth.json", "backups", "backups_state",
-    "cc-switch-model-catalog.json", "rules", "skills",
-]
+# Backwards-compatible aliases (Codex stays the default target).
+CODEX_HOME = agent_home("codex")
+PROTECTED = AGENTS["codex"]["protected"]
 
 LOGS_REBUILD_MB = 100
+WAL_WARN_MB = 32
 
 
 # Helpers
@@ -288,16 +343,20 @@ def _planned_action(kind: str, path: str, reclaim_bytes: int, days: int) -> dict
     }
 
 
-def scan(age_days: int = 0):
+def scan(age_days: int = 0, target: str = "codex"):
+    spec = AGENTS.get(target) or AGENTS["codex"]
+    home = agent_home(target)
+    caps = spec["capabilities"]
     items = []
-    for name, path, dkey in DELETABLE:
+    for name, rel, dkey in spec["deletable"]:
+        path = home / rel
         eb, ec, tb, tc = _age_stats(path, age_days)
         # With an age filter only the eligible bytes are actually reclaimable.
         sz = eb if age_days > 0 else tb
         action = (_t("action.delete_aged", days=age_days, size=human(sz))
                   if age_days > 0 else _t("action.delete", size=human(sz)))
         items.append({
-            "kind": "delete", "name": name, "path": str(path),
+            "kind": "delete", "name": name, "path": str(path), "agent": target,
             "desc": _t(dkey), "size_bytes": sz, "size": human(sz),
             "exists": path.exists(), "action": action,
             "age_filter_days": age_days if age_days > 0 else None,
@@ -308,31 +367,34 @@ def scan(age_days: int = 0):
             "planned_action": _planned_action("delete", str(path), sz, age_days),
             "safe": True,
         })
-    for name, db_path, dkey in SQLITE_DBS:
-        main, wal, shm = _db_sizes(db_path)
-        total = main + wal + shm
-        has_db = db_path.exists()
-        items.append({
-            "kind": "vacuum", "name": name, "path": str(db_path),
-            "desc": _t(dkey), "size_bytes": total, "size": human(total),
-            "exists": has_db, "db_main": main, "db_wal": wal, "db_shm": shm,
-            "action": _t("action.vacuum"),
-            "age_filter_days": None,
-            "reclaimable_bytes": wal,
-            "planned_action": _planned_action("vacuum", str(db_path), wal, 0),
-            "safe": True,
-        })
-        if name == "logs-db" and main > LOGS_REBUILD_MB * 1024 * 1024:
+    if caps["vacuum"]:
+        for name, rel, dkey in spec["dbs"]:
+            db_path = home / rel
+            main, wal, shm = _db_sizes(db_path)
+            total = main + wal + shm
+            has_db = db_path.exists()
             items.append({
-                "kind": "rebuild", "name": "logs-rebuild", "path": str(db_path),
-                "desc": _t("desc.logs-rebuild", mb=LOGS_REBUILD_MB),
-                "size_bytes": main, "size": human(main), "exists": True,
-                "action": _t("action.rebuild", size=human(main)),
+                "kind": "vacuum", "name": name, "path": str(db_path), "agent": target,
+                "desc": _t(dkey), "size_bytes": total, "size": human(total),
+                "exists": has_db, "db_main": main, "db_wal": wal, "db_shm": shm,
+                "action": _t("action.vacuum"),
                 "age_filter_days": None,
-                "reclaimable_bytes": main,
-                "planned_action": _planned_action("rebuild", str(db_path), main, 0),
-                "safe": False,  # destructive: requires explicit --rebuild-logs
+                "reclaimable_bytes": wal,
+                "planned_action": _planned_action("vacuum", str(db_path), wal, 0),
+                "safe": True,
             })
+            if spec["rebuild_db"] == name and main > LOGS_REBUILD_MB * 1024 * 1024:
+                items.append({
+                    "kind": "rebuild", "name": "logs-rebuild", "path": str(db_path),
+                    "agent": target,
+                    "desc": _t("desc.logs-rebuild", mb=LOGS_REBUILD_MB),
+                    "size_bytes": main, "size": human(main), "exists": True,
+                    "action": _t("action.rebuild", size=human(main)),
+                    "age_filter_days": None,
+                    "reclaimable_bytes": main,
+                    "planned_action": _planned_action("rebuild", str(db_path), main, 0),
+                    "safe": False,  # destructive: requires explicit --rebuild-logs
+                })
     # Surface the biggest reclaimable wins first for easier triage.
     items.sort(key=lambda i: i.get("reclaimable_bytes", 0), reverse=True)
     return items
@@ -440,6 +502,8 @@ def main():
     ap.add_argument("--vacuum", action="store_true", help=_t("arg.vacuum"))
     ap.add_argument("--rebuild-logs", action="store_true", help=_t("arg.rebuild"))
     ap.add_argument("--age", type=int, default=0, metavar="N", help=_t("arg.age"))
+    ap.add_argument("--target", choices=sorted(AGENTS), default="codex",
+                    help=_t("arg.target"))
     ap.add_argument("--lang", choices=["en", "zh", "auto"], default="auto",
                     help=_t("arg.lang"))
     ap.add_argument("--json", action="store_true", help=_t("arg.json"))
@@ -450,14 +514,20 @@ def main():
 
     _LANG = _resolve_lang(args.lang)
     _AGE_DAYS = args.age
-    items = scan(args.age)
+    spec = AGENTS[args.target]
+    home = agent_home(args.target)
+    items = scan(args.age, args.target)
 
     if not args.clean:
         if args.json:
             print(json.dumps(items, ensure_ascii=False, default=str))
             return 0
-        print(_t("scan.title"))
-        print(_t("scan.codedir", path=CODEX_HOME))
+        print(_t("scan.title", label=spec["label"]))
+        print(_t("scan.codedir", label=spec["label"], path=home))
+        if args.vacuum and not spec["capabilities"]["vacuum"]:
+            print(_t("scan.no_vacuum"))
+        if args.rebuild_logs and not spec["capabilities"]["rebuild_logs"]:
+            print(_t("scan.no_rebuild"))
         if args.age > 0:
             print(_t("scan.agefilter", days=args.age))
         print()
@@ -466,9 +536,12 @@ def main():
             # total is annotated when the two differ (VACUUM reclaims the WAL only).
             disp = it.get("reclaimable_bytes", it["size_bytes"])
             note = _t("scan.of_total", size=it["size"]) if disp != it["size_bytes"] else ""
-            print(f"  [{it['kind']:<6}] {human(disp):>10}  {it['name']:<14} {it['desc']}{note}")
+            print(f"  [{it['kind']:<6}] {human(disp):>10}  {it['name']:<24} {it['desc']}{note}")
             if it["exists"]:
                 print(f"              {it['path']}")
+        wal_total = sum(i.get("db_wal", 0) for i in items if i["kind"] == "vacuum")
+        if wal_total > WAL_WARN_MB * 1024 * 1024:
+            print(_t("scan.wal_hint", size=human(wal_total)))
         tot = sum(i.get("reclaimable_bytes", 0) for i in items if i["exists"])
         print(f"\n{_t('scan.reclaim', size=human(tot))}")
         print(_t("scan.hint"))
@@ -476,8 +549,8 @@ def main():
         return 0
 
     # --- cleanup ---
-    allow_vacuum = args.vacuum
-    allow_rebuild = args.rebuild_logs
+    allow_vacuum = args.vacuum and spec["capabilities"]["vacuum"]
+    allow_rebuild = args.rebuild_logs and spec["capabilities"]["rebuild_logs"]
 
     candidates = []
     for it in items:
@@ -585,6 +658,8 @@ def main():
             "ok": True,
             "dry_run": False,
             "version": VERSION,
+            "agent": args.target,
+            "agent_home": str(home),
             "codex_home": str(CODEX_HOME),
             "age_filter_days": args.age if args.age > 0 else None,
             "estimated_bytes": estimated,
@@ -595,7 +670,7 @@ def main():
             "summary": _t("json.est_vs_act", est=human(estimated),
                           act=human(freed), delta=human(freed - estimated)),
             "items": results,
-            "protected_untouched": PROTECTED,
+            "protected_untouched": spec["protected"],
         }, ensure_ascii=False, default=str))
         return 0
 
