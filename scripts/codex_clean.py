@@ -7,7 +7,7 @@ differences (home path, data format, optional capabilities such as VACUUM) are
 data, not branches. Protected data (conversations, config, projects) is never touched.
 
 Usage: codex_clean.py [--scan | --clean] [--age N] [--vacuum] [--rebuild-logs]
-                      [--target codex|claude-code] [--json] [--lang en|zh|auto] [--yes]
+                      [--target codex|claude-code|pi] [--json] [--lang en|zh|auto] [--yes]
 Lang order: --lang > CODEX_CLEAN_LANG > LANG/LC_ALL > OS UI lang > en.
 Exit codes: 0 ok, 2 bad args.
 """
@@ -22,14 +22,29 @@ import sys
 import time
 from pathlib import Path
 
-# Single source of truth: keep in sync with the GitHub Release tag (v1.3.0).
-VERSION = "1.3.0"
+# Single source of truth: keep in sync with the GitHub Release tag (v1.4.0).
+VERSION = "1.4.0"
 
 # Per-agent registry. Adding an agent = one entry here; nothing else branches on
 # the agent. Paths are relative to the agent home and resolved at scan time.
 #   deletable   -> (item name, relative path, i18n description key)
 #   dbs         -> (item name, relative path, i18n key); empty = no SQLite at all
 #   capabilities-> optional features that do not apply to every agent
+# ---------------------------------------------------------------------------
+# Known per-agent LIMITATIONS (verified, not oversights -- see README):
+#
+#   --rebuild-logs  (claude-code, pi)
+#       Neither agent has an "oversized diagnostic log DB". Their logs are plain
+#       files (claude: debug/, pi: logs/) already covered by the delete whitelist,
+#       so there is no database to rebuild. The flag reports "does not apply".
+#
+#   --vacuum  (claude-code, pi)
+#       Not hardcoded as unsupported: these agents declare no fixed DB list and set
+#       discover_dbs=True, so scan() picks up any *.sqlite / *.sqlite3 / *.db found
+#       in their home. Verified today: 0 such files under ~/.claude, so --vacuum
+#       reports "does not apply" because there is nothing to shrink. If a future
+#       release ships a database, VACUUM starts working with no code change.
+# ---------------------------------------------------------------------------
 AGENTS = {
     "codex": {
         "label": "Codex",
@@ -53,13 +68,15 @@ AGENTS = {
             "cc-switch-model-catalog.json", "rules", "skills",
         ],
         "rebuild_db": "logs-db",
+        "discover_dbs": False,
         "capabilities": {"vacuum": True, "rebuild_logs": True},
     },
     "claude-code": {
         "label": "Claude Code",
         "home_env": "CLAUDE_HOME",
         "home_rel": ".claude",
-        # Conversations are JSONL, not SQLite: no dbs, so VACUUM/rebuild do not apply.
+        # Conversations are JSONL; no fixed DB list -> databases are discovered
+        # at runtime (see the LIMITATIONS block above).
         "deletable": [
             ("claude-cache", "cache", "desc.claude-cache"),
             ("claude-debug", "debug", "desc.claude-debug"),
@@ -72,9 +89,36 @@ AGENTS = {
             "backups", "sessions", "ide", "history.jsonl",
         ],
         "rebuild_db": None,
-        "capabilities": {"vacuum": False, "rebuild_logs": False},
+        "discover_dbs": True,
+        "capabilities": {"vacuum": True, "rebuild_logs": False},
+    },
+    "pi": {
+        "label": "Pi",
+        "home_env": "PI_AGENT_HOME",
+        "home_rel": ".pi/agent",
+        # Verified against the official docs (earendil-works/pi,
+        # packages/coding-agent/docs/settings.md): ~/.pi/agent holds sessions/,
+        # skills/, npm/ (user-installed packages), settings.json, trust.json,
+        # auth.json, AGENTS.md, SYSTEM.md -- all user data, all protected.
+        # No regenerable cache is documented; cache/ tmp/ logs/ are offered
+        # best-effort and only if present (missing dirs are simply reported as
+        # "does not exist", never created or assumed).
+        "deletable": [
+            ("pi-cache", "cache", "desc.pi-cache"),
+            ("pi-tmp", "tmp", "desc.pi-tmp"),
+            ("pi-logs", "logs", "desc.pi-logs"),
+        ],
+        "dbs": [],
+        "protected": [
+            "sessions", "skills", "npm", "settings.json", "trust.json",
+            "auth.json", "AGENTS.md", "SYSTEM.md",
+        ],
+        "rebuild_db": None,
+        "discover_dbs": True,
+        "capabilities": {"vacuum": True, "rebuild_logs": False},
     },
 }
+
 
 
 def agent_home(target: str) -> Path:
@@ -139,12 +183,16 @@ _MSGS = {
         "arg.json": "machine-readable output",
         "arg.target": "which agent's data to clean (default: codex)",
         "scan.wal_hint": "Hint: WAL totals {size} - consider a periodic --clean --vacuum.",
-        "scan.no_vacuum": "Note: this target has no SQLite databases, so --vacuum does not apply.",
+        "scan.no_vacuum": "Note: --vacuum does not apply - no SQLite databases found under this target.",
         "scan.no_rebuild": "Note: this target has no oversized log DB, so --rebuild-logs does not apply.",
         "desc.claude-cache": "Claude Code cache (regenerable)",
         "desc.claude-debug": "Claude Code debug logs (regenerable)",
         "desc.claude-snapshots": "Shell snapshots (regenerable)",
         "desc.claude-statsig": "Statsig/telemetry cache (regenerable)",
+        "desc.pi-cache": "Pi cache (regenerable; best-effort, cleaned only if present)",
+        "desc.pi-tmp": "Pi temp files (regenerable; best-effort)",
+        "desc.pi-logs": "Pi logs (regenerable; best-effort)",
+        "desc.discovered-db": "Auto-discovered SQLite DB (VACUUM/WAL only, data kept)",
         "json.est_vs_act": "estimated={est} actual={act} delta={delta}",
     },
     "zh": {
@@ -202,12 +250,16 @@ _MSGS = {
         "arg.json": "机器可读输出",
         "arg.target": "要清理哪个 agent 的数据(默认: codex)",
         "scan.wal_hint": "提示: WAL 合计 {size}, 建议定期执行 --clean --vacuum。",
-        "scan.no_vacuum": "说明: 该目标没有 SQLite 数据库, --vacuum 不适用。",
+        "scan.no_vacuum": "说明: --vacuum 不适用——该目标下未发现 SQLite 数据库。",
         "scan.no_rebuild": "说明: 该目标没有超大日志库, --rebuild-logs 不适用。",
         "desc.claude-cache": "Claude Code 缓存(可再生)",
         "desc.claude-debug": "Claude Code 调试日志(可再生)",
         "desc.claude-snapshots": "Shell 快照(可再生)",
         "desc.claude-statsig": "Statsig/遥测缓存(可再生)",
+        "desc.pi-cache": "Pi 缓存(可再生; 尽力而为, 仅当存在时清理)",
+        "desc.pi-tmp": "Pi 临时文件(可再生; 尽力而为)",
+        "desc.pi-logs": "Pi 日志(可再生; 尽力而为)",
+        "desc.discovered-db": "自动发现的 SQLite 库(仅VACUUM/WAL, 保留数据)",
         "json.est_vs_act": "预估={est} 实际={act} 差值={delta}",
     },
 }
@@ -368,7 +420,15 @@ def scan(age_days: int = 0, target: str = "codex"):
             "safe": True,
         })
     if caps["vacuum"]:
-        for name, rel, dkey in spec["dbs"]:
+        db_specs = list(spec["dbs"])
+        # No fixed DB list -> discover SQLite files at runtime. Finding none is
+        # normal for agents that store JSONL; --vacuum then reports "does not apply".
+        if spec.get("discover_dbs"):
+            for pat in ("*.sqlite", "*.sqlite3", "*.db"):
+                for p in sorted(home.glob(pat)):
+                    if p.is_file() and all(p.name != r for _n, r, _k in db_specs):
+                        db_specs.append((p.stem, p.name, "desc.discovered-db"))
+        for name, rel, dkey in db_specs:
             db_path = home / rel
             main, wal, shm = _db_sizes(db_path)
             total = main + wal + shm
@@ -524,7 +584,7 @@ def main():
             return 0
         print(_t("scan.title", label=spec["label"]))
         print(_t("scan.codedir", label=spec["label"], path=home))
-        if args.vacuum and not spec["capabilities"]["vacuum"]:
+        if args.vacuum and not any(i["kind"] == "vacuum" for i in items):
             print(_t("scan.no_vacuum"))
         if args.rebuild_logs and not spec["capabilities"]["rebuild_logs"]:
             print(_t("scan.no_rebuild"))
