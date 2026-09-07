@@ -252,6 +252,15 @@ frontmatter so it can run the script without an approval prompt.
 
 All tracked on the [project board](https://github.com/users/Merlin-Arthur05/projects/3).
 
+## Tests
+
+```bash
+python tests/test_codex_clean.py   # 28 regression checks, standard library only
+```
+
+The suite points `CODEX_HOME` / `CLAUDE_HOME` at throwaway temp directories, so it never
+touches a real agent home.
+
 ## License
 
 [MIT](LICENSE) © Merlin-Arthur05
