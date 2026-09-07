@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-07
+
 ### Added
 
 - **Bilingual docs**: `SKILL` and `CONTRIBUTING` now ship in two languages
@@ -19,8 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Claude Code support scheduled**: new issues #13 (`~/.claude` cleanup target) and #14 (ship as a `/codex-clean` Claude Code skill / slash command), both under Milestone v1.3.0. Verified against a live `~/.claude` install: data is JSONL rather than SQLite, so VACUUM and log-DB rebuild do not apply - these become per-agent capability flags, not hardcoded branches. Planning only; no code or version change in this entry.
 - The project board now carries a bilingual README documenting the versioning
   rules, the milestones, and the safety contract.
+- **Multi-agent target registry (#11)**: cleanup targets are now declared as data in a
+  single `AGENTS` registry instead of module-level constants. Adding an agent is one entry;
+  there is no agent-specific branching in the scan/clean flow.
+- **Claude Code support (#13)**: `--target claude-code` cleans `~/.claude`
+  (override with `CLAUDE_HOME`). Whitelist: `cache/`, `debug/`, `shell-snapshots/`,
+  `statsig/`. Protects `projects/` (conversations), `memory/`, `plugins/`, `skills/`,
+  `settings.json`, `config.json`, `sessions/`, `ide/`, `history.jsonl`.
+- **Claude Code skill install docs (#14)**: `~/.claude/skills/codex-clean/SKILL.md` exposes
+  a `/codex-clean` slash command (Agent Skills open standard, shared SKILL.md body).
+- **WAL watchdog hint (#4)**: scan prints a hint when WAL files total more than 32 MB.
 
 ### Changed
+
+- Scan title and directory line are now agent-aware (`Codex ...` / `Claude Code ...`).
+- Item name column widened to 24 chars so longer agent-specific names stay aligned.
+- JSON output gains `agent` and `agent_home`; `codex_home` and every pre-existing key are
+  kept, so v1.2.x consumers keep working.
 
 - Code comments and docstrings condensed and kept uniformly English: module
   docstring 25 -> 11 lines, multi-line function docstrings collapsed to one line
