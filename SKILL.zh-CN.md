@@ -1,6 +1,7 @@
 ---
 name: codex-clean
-description: "Codex 专属的运行时缓存/日志清理——只针对 Codex 自身(~/.codex)产生的可再生数据，与通用电脑清理(qing-li-dian-nao)完全不同：不清电脑磁盘、不整理文件、不扫项目目录。适用场景：Codex 磁盘占用膨胀、Codex 日志/临时文件过多、logs_2.sqlite 及 WAL 巨大、SSD 写入量大时使用。触发词：清理Codex缓存、Codex日志太多、Codex占空间、codex cache clean、codex log clean、codex SSD占用、clean up codex。独有能力：①对 Codex 的 SQLite 库执行 VACUUM + WAL checkpoint(TRUNCATE)——这是通用清理工具没有的、针对 Codex 日志库/WAL 膨胀的专用手段；②logs_2.sqlite(仅诊断日志、非会话)超过100MB可备份后重建；③输出支持中英双语随客户端语言切换(--lang/CODEX_CLEAN_LANG)；④纯标准库零依赖；⑤`--age N` 按文件年龄只清超过 N 天的过期临时文件（保留近期文件，避免误删正在使用的缓存）；⑥`--json` 输出含每项的 planned_action 预览，以及清理后"预估释放 vs 实际释放"对比。安全边界：只删可重建缓存(.tmp/plugins/cache)、只真空不删库内数据，绝不触碰会话历史(sessions)、state/记忆/目标库内容、auth.json/config.toml、bin/runtimes 可执行文件及用户项目。默认先只读扫描列清单，逐项确认后才执行。"
+allowed-tools: Bash, Read
+description: "面向 AI 编程 agent 的运行时缓存/日志清理——只针对 agent 自身(~/.codex、~/.claude)产生的可再生数据，与通用电脑清理(qing-li-dian-nao)完全不同：不清电脑磁盘、不整理文件、不扫项目目录。适用场景：Codex 磁盘占用膨胀、Codex 日志/临时文件过多、logs_2.sqlite 及 WAL 巨大、SSD 写入量大时使用。触发词：清理Codex缓存、Codex日志太多、Codex占空间、codex cache clean、codex log clean、codex SSD占用、clean up codex。独有能力：①对 Codex 的 SQLite 库执行 VACUUM + WAL checkpoint(TRUNCATE)——这是通用清理工具没有的、针对 Codex 日志库/WAL 膨胀的专用手段；②logs_2.sqlite(仅诊断日志、非会话)超过100MB可备份后重建；③输出支持中英双语随客户端语言切换(--lang/CODEX_CLEAN_LANG)；④纯标准库零依赖；⑤`--age N` 按文件年龄只清超过 N 天的过期临时文件（保留近期文件，避免误删正在使用的缓存）；⑥`--json` 输出含每项的 planned_action 预览，以及清理后"预估释放 vs 实际释放"对比。安全边界：只删可重建缓存(.tmp/plugins/cache)、只真空不删库内数据，绝不触碰会话历史(sessions)、state/记忆/目标库内容、auth.json/config.toml、bin/runtimes 可执行文件及用户项目。默认先只读扫描列清单，逐项确认后才执行。"
 ---
 
 # Codex 缓存与日志完整清理
