@@ -166,6 +166,23 @@ python scripts/codex_clean.py --scan --lang zh
 # 10. Clean a different agent (Claude Code)
 python scripts/codex_clean.py --scan --target claude-code
 python scripts/codex_clean.py --clean --yes --target claude-code
+
+# 11. Sweep every agent at once
+python scripts/codex_clean.py --scan --target all
+
+# 12. Skip or keep specific items (name or agent:name, comma separated)
+python scripts/codex_clean.py --scan --target all --exclude "state-db,pi-cache"
+python scripts/codex_clean.py --scan --target all --only claude-cache
+
+# 13. Preview a cleanup without changing anything
+python scripts/codex_clean.py --clean --dry-run --target codex
+
+# 14. Inspect supported agents and their capabilities
+python scripts/codex_clean.py --list-targets
+python scripts/codex_clean.py --list-targets --json
+
+# 15. Automation: exit 3 when reclaimable space reaches 500 MB
+python scripts/codex_clean.py --scan --check 500
 ```
 
 ### `--age N` — filter by file age
@@ -273,6 +290,25 @@ frontmatter so it can run the script without an approval prompt.
     one spec entry. Tracked in [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11).
 
 All tracked on the [project board](https://github.com/users/Merlin-Arthur05/projects/3).
+
+## Filtering, dry-run & automation
+
+| Flag | What it does |
+|---|---|
+| `--target all` | sweep every registered agent in one run |
+| `--exclude LIST` | skip items by `name` or `agent:name` (comma separated) |
+| `--only LIST` | keep only the listed items (inverse of `--exclude`) |
+| `--dry-run` | print the plan `--clean` would execute, change nothing |
+| `--list-targets` | print supported agents, their homes and capabilities |
+| `--check N` | exit **3** when reclaimable space reaches N MB (0 = off) |
+
+Notes:
+
+- Filtering can only **narrow** the whitelist. Protected entries are never part of the
+  scanned items, so no pattern can bring one back.
+- `--dry-run` reuses the `planned_action` data already present in `--json` scan output,
+  so the preview and the real run describe the same actions.
+- Exit codes: `0` ok, `2` bad arguments, `3` reclaimable reached the `--check` threshold.
 
 ## Tests
 
