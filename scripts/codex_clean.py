@@ -7,9 +7,11 @@ differences (home path, data format, optional capabilities such as VACUUM) are
 data, not branches. Protected data (conversations, config, projects) is never touched.
 
 Usage: codex_clean.py [--scan | --clean] [--age N] [--vacuum] [--rebuild-logs]
-                      [--target codex|claude-code|pi] [--json] [--lang en|zh|auto] [--yes]
+                      [--target codex|claude-code|pi|all] [--exclude LIST] [--only LIST]
+                      [--dry-run] [--list-targets] [--check N]
+                      [--json] [--lang en|zh|auto] [--yes]
 Lang order: --lang > CODEX_CLEAN_LANG > LANG/LC_ALL > OS UI lang > en.
-Exit codes: 0 ok, 2 bad args.
+Exit codes: 0 ok, 2 bad args, 3 reclaimable reached --check threshold.
 """
 from __future__ import annotations
 
@@ -22,8 +24,8 @@ import sys
 import time
 from pathlib import Path
 
-# Single source of truth: keep in sync with the GitHub Release tag (v1.4.0).
-VERSION = "1.4.0"
+# Single source of truth: keep in sync with the GitHub Release tag (v1.5.0).
+VERSION = "1.5.0"
 
 # Per-agent registry. Adding an agent = one entry here; nothing else branches on
 # the agent. Paths are relative to the agent home and resolved at scan time.
@@ -193,6 +195,14 @@ _MSGS = {
         "desc.pi-tmp": "Pi temp files (regenerable; best-effort)",
         "desc.pi-logs": "Pi logs (regenerable; best-effort)",
         "desc.discovered-db": "Auto-discovered SQLite DB (VACUUM/WAL only, data kept)",
+        "arg.exclude": "comma-separated item or agent:item names to skip",
+        "arg.only": "comma-separated item or agent:item names to keep (inverse of --exclude)",
+        "arg.dryrun": "show what --clean would do, without changing anything",
+        "arg.listtargets": "list supported agents and their capabilities, then exit",
+        "arg.check": "exit 3 when reclaimable space reaches N MB (0 = off; for automation)",
+        "list.title": "=== Available cleanup targets ===",
+        "dry.title": "=== Dry run - no changes will be made ===",
+        "check.over": "Reclaimable {size} reached the {thr} threshold",
         "json.est_vs_act": "estimated={est} actual={act} delta={delta}",
     },
     "zh": {
@@ -260,6 +270,14 @@ _MSGS = {
         "desc.pi-tmp": "Pi 临时文件(可再生; 尽力而为)",
         "desc.pi-logs": "Pi 日志(可再生; 尽力而为)",
         "desc.discovered-db": "自动发现的 SQLite 库(仅VACUUM/WAL, 保留数据)",
+        "arg.exclude": "逗号分隔的项名或 agent:项名, 跳过这些项",
+        "arg.only": "逗号分隔的项名或 agent:项名, 只保留这些项(--exclude 的反义)",
+        "arg.dryrun": "只显示 --clean 将要做什么, 不做任何改动",
+        "arg.listtargets": "列出支持的 agent 及其能力后退出",
+        "arg.check": "可回收空间达到 N MB 时以退出码 3 返回(0=关闭; 用于自动化)",
+        "list.title": "=== 可用清理目标 ===",
+        "dry.title": "=== 预演 - 不会做任何改动 ===",
+        "check.over": "可回收 {size} 已达到阈值 {thr}",
         "json.est_vs_act": "预估={est} 实际={act} 差值={delta}",
     },
 }
@@ -550,6 +568,94 @@ def rebuild_logs(db_path: Path) -> tuple[bool, str]:
         return False, _t("rebuild_fail", err=e)
 
 
+def _item_key(it) -> tuple:
+    """Identity of a cleanable item.
+
+    (agent, name) rather than bare name: with `--target all` two agents can own
+    items with the same name, and the confirm/execute flow must not confuse them.
+    """
+    return (it.get("agent", "codex"), it["name"])
+
+
+def resolve_targets(target: str) -> list:
+    """`--target all` expands to every registered agent (alphabetical)."""
+    return sorted(AGENTS) if target == "all" else [target]
+
+
+def filter_items(items, exclude_csv: str, only_csv: str) -> list:
+    """Apply `--exclude` / `--only`.
+
+    Patterns match a bare item name, an `agent:name` pair, or a whole agent.
+    Filtering can only narrow the whitelist: protected entries are never part of
+    the scanned items, so no pattern can surface one.
+    """
+    ex = [s.strip() for s in (exclude_csv or "").split(",") if s.strip()]
+    on = [s.strip() for s in (only_csv or "").split(",") if s.strip()]
+    if not ex and not on:
+        return items
+    out = []
+    for it in items:
+        labels = {it["name"], f"{it.get('agent', 'codex')}:{it['name']}",
+                  it.get("agent", "codex")}
+        if ex and (labels & set(ex)):
+            continue
+        if on and not (labels & set(on)):
+            continue
+        out.append(it)
+    return out
+
+
+def _protected_union(targets) -> list:
+    """Protected entries of every selected agent (order preserved, deduped)."""
+    out = []
+    for t in targets:
+        for p in AGENTS[t]["protected"]:
+            if p not in out:
+                out.append(p)
+    return out
+
+
+def cmd_list_targets(json_mode: bool) -> int:
+    """Print the agent registry: names, homes, capabilities, whitelists."""
+    rows = []
+    for t in sorted(AGENTS):
+        sp = AGENTS[t]
+        rows.append({
+            "name": t, "label": sp["label"], "home": str(agent_home(t)),
+            "home_env": sp["home_env"],
+            "deletable": [n for n, _r, _k in sp["deletable"]],
+            "dbs": [n for n, _r, _k in sp["dbs"]],
+            "discover_dbs": sp.get("discover_dbs", False),
+            "protected": sp["protected"],
+            "capabilities": sp["capabilities"],
+        })
+    if json_mode:
+        print(json.dumps(rows, ensure_ascii=False, default=str))
+        return 0
+    print(_t("list.title"))
+    for r in rows:
+        caps = r["capabilities"]
+        print(f"  {r['name']:<12} {r['label']:<12} {r['home']}")
+        print(f"      vacuum={caps['vacuum']}  rebuild_logs={caps['rebuild_logs']}"
+              f"  discover_dbs={r['discover_dbs']}")
+        print(f"      deletable={', '.join(r['deletable']) or '-'}"
+              f"  dbs={', '.join(r['dbs']) or '-'}")
+    return 0
+
+
+def _check_exit(items, args) -> int:
+    """`--check N` -> exit 3 once reclaimable space reaches N MB (automation)."""
+    if not getattr(args, "check", 0):
+        return 0
+    tot = sum(i.get("reclaimable_bytes", 0) for i in items if i["exists"])
+    thr = args.check * 1024 * 1024
+    if tot >= thr:
+        if not args.json:
+            print(_t("check.over", size=human(tot), thr=human(thr)))
+        return 3
+    return 0
+
+
 # CLI
 def main():
     global _LANG, _AGE_DAYS
@@ -562,43 +668,58 @@ def main():
     ap.add_argument("--vacuum", action="store_true", help=_t("arg.vacuum"))
     ap.add_argument("--rebuild-logs", action="store_true", help=_t("arg.rebuild"))
     ap.add_argument("--age", type=int, default=0, metavar="N", help=_t("arg.age"))
-    ap.add_argument("--target", choices=sorted(AGENTS), default="codex",
+    ap.add_argument("--target", choices=sorted(AGENTS) + ["all"], default="codex",
                     help=_t("arg.target"))
     ap.add_argument("--lang", choices=["en", "zh", "auto"], default="auto",
                     help=_t("arg.lang"))
     ap.add_argument("--json", action="store_true", help=_t("arg.json"))
+    ap.add_argument("--exclude", metavar="LIST", default="", help=_t("arg.exclude"))
+    ap.add_argument("--only", metavar="LIST", default="", help=_t("arg.only"))
+    ap.add_argument("--dry-run", action="store_true", help=_t("arg.dryrun"))
+    ap.add_argument("--list-targets", action="store_true", help=_t("arg.listtargets"))
+    ap.add_argument("--check", type=int, default=0, metavar="N", help=_t("arg.check"))
     args = ap.parse_args()
+
+    if args.list_targets:
+        return cmd_list_targets(args.json)
+    if args.check < 0:
+        ap.error("--check must be >= 0")
 
     if args.age < 0:
         ap.error("--age must be >= 0")
 
     _LANG = _resolve_lang(args.lang)
     _AGE_DAYS = args.age
-    spec = AGENTS[args.target]
-    home = agent_home(args.target)
-    items = scan(args.age, args.target)
+    targets = resolve_targets(args.target)
+    items = []
+    for _tn in targets:
+        items.extend(scan(args.age, _tn))
+    items = filter_items(items, args.exclude, args.only)
 
     if not args.clean:
         if args.json:
             print(json.dumps(items, ensure_ascii=False, default=str))
-            return 0
-        print(_t("scan.title", label=spec["label"]))
-        print(_t("scan.codedir", label=spec["label"], path=home))
-        if args.vacuum and not any(i["kind"] == "vacuum" for i in items):
-            print(_t("scan.no_vacuum"))
-        if args.rebuild_logs and not spec["capabilities"]["rebuild_logs"]:
-            print(_t("scan.no_rebuild"))
-        if args.age > 0:
-            print(_t("scan.agefilter", days=args.age))
-        print()
-        for it in items:
-            # Column shows the reclaimable amount so it sums to the footer; the DB
-            # total is annotated when the two differ (VACUUM reclaims the WAL only).
-            disp = it.get("reclaimable_bytes", it["size_bytes"])
-            note = _t("scan.of_total", size=it["size"]) if disp != it["size_bytes"] else ""
-            print(f"  [{it['kind']:<6}] {human(disp):>10}  {it['name']:<24} {it['desc']}{note}")
-            if it["exists"]:
-                print(f"              {it['path']}")
+            return _check_exit(items, args)
+        for _tn in targets:
+            _sp = AGENTS[_tn]
+            _sub = [i for i in items if i.get("agent") == _tn]
+            print(_t("scan.title", label=_sp["label"]))
+            print(_t("scan.codedir", label=_sp["label"], path=agent_home(_tn)))
+            if args.vacuum and not any(i["kind"] == "vacuum" for i in _sub):
+                print(_t("scan.no_vacuum"))
+            if args.rebuild_logs and not _sp["capabilities"]["rebuild_logs"]:
+                print(_t("scan.no_rebuild"))
+            if args.age > 0:
+                print(_t("scan.agefilter", days=args.age))
+            print()
+            for it in _sub:
+                # Column shows the reclaimable amount so it sums to the footer; the DB
+                # total is annotated when the two differ (VACUUM reclaims the WAL only).
+                disp = it.get("reclaimable_bytes", it["size_bytes"])
+                note = _t("scan.of_total", size=it["size"]) if disp != it["size_bytes"] else ""
+                print(f"  [{it['kind']:<6}] {human(disp):>10}  {it['name']:<24} {it['desc']}{note}")
+                if it["exists"]:
+                    print(f"              {it['path']}")
         wal_total = sum(i.get("db_wal", 0) for i in items if i["kind"] == "vacuum")
         if wal_total > WAL_WARN_MB * 1024 * 1024:
             print(_t("scan.wal_hint", size=human(wal_total)))
@@ -606,21 +727,19 @@ def main():
         print(f"\n{_t('scan.reclaim', size=human(tot))}")
         print(_t("scan.hint"))
         print(_t("scan.hint2"))
-        return 0
+        return _check_exit(items, args)
 
     # --- cleanup ---
-    allow_vacuum = args.vacuum and spec["capabilities"]["vacuum"]
-    allow_rebuild = args.rebuild_logs and spec["capabilities"]["rebuild_logs"]
-
     candidates = []
     for it in items:
         if not it["exists"]:
             continue
+        _sp = AGENTS.get(it.get("agent", "codex"), AGENTS["codex"])
         if it["kind"] == "delete":
             candidates.append(it)
-        elif it["kind"] == "vacuum" and allow_vacuum:
+        elif it["kind"] == "vacuum" and args.vacuum and _sp["capabilities"]["vacuum"]:
             candidates.append(it)
-        elif it["kind"] == "rebuild" and allow_rebuild:
+        elif it["kind"] == "rebuild" and args.rebuild_logs and _sp["capabilities"]["rebuild_logs"]:
             candidates.append(it)
 
     if not candidates:
@@ -629,7 +748,7 @@ def main():
 
     confirmed = []
     if args.yes:
-        confirmed = [c["name"] for c in candidates]
+        confirmed = [_item_key(c) for c in candidates]
         if not args.json:
             print(_t("confirm.autoyes"))
     else:
@@ -639,18 +758,19 @@ def main():
             return 0
         print(_t("confirm.title"))
         for i, c in enumerate(candidates):
-            print(f"  [{i + 1}] {c['name']:<16} ({c['size']:>8})  {c['desc']}")
+            _pfx = (c.get("agent", "codex") + ":") if len(targets) > 1 else ""
+            print(f"  [{i + 1}] {_pfx + c['name']:<24} ({c['size']:>8})  {c['desc']}")
         print(_t("confirm.prompt"))
         try:
             resp = input("> ").strip().lower()
         except EOFError:
             resp = ""
         if resp in ("all", "a"):
-            confirmed = [c["name"] for c in candidates]
+            confirmed = [_item_key(c) for c in candidates]
         elif resp:
             try:
                 idxs = [int(x) for x in resp.split(",") if x.strip()]
-                confirmed = [candidates[i - 1]["name"] for i in idxs
+                confirmed = [_item_key(candidates[i - 1]) for i in idxs
                              if 1 <= i <= len(candidates)]
             except ValueError:
                 print(_t("confirm.invalid"))
@@ -664,7 +784,32 @@ def main():
         return 0
 
     estimated = sum(c.get("reclaimable_bytes", c["size_bytes"])
-                    for c in candidates if c["name"] in confirmed)
+                    for c in candidates if _item_key(c) in confirmed)
+
+    if args.dry_run:
+        planned = [c for c in candidates if _item_key(c) in confirmed]
+        if args.json:
+            print(json.dumps({
+                "ok": True, "dry_run": True, "version": VERSION,
+                "agent": args.target, "targets": targets,
+                "age_filter_days": args.age if args.age > 0 else None,
+                "estimated_bytes": estimated, "estimated": human(estimated),
+                "items": [{"agent": c.get("agent", "codex"), "name": c["name"],
+                           "kind": c["kind"], "path": c["path"],
+                           "estimated_bytes": c.get("reclaimable_bytes", c["size_bytes"]),
+                           "planned_action": c.get("planned_action"),
+                           "status": "planned"} for c in planned],
+                "protected_untouched": _protected_union(targets),
+            }, ensure_ascii=False, default=str))
+            return 0
+        print(_t("dry.title"))
+        for c in planned:
+            _pfx = (c.get("agent", "codex") + ":") if len(targets) > 1 else ""
+            print(f"  [{c['kind']:<6}] {human(c.get('reclaimable_bytes', 0)):>10}  "
+                  f"{_pfx + c['name']}")
+        print(f"\n{_t('clean.estimated', size=human(estimated))}")
+        return 0
+
     results = []
     freed = 0
 
@@ -672,7 +817,7 @@ def main():
         print(_t("clean.title"))
 
     for it in items:
-        if it["name"] not in confirmed:
+        if _item_key(it) not in confirmed:
             continue
         est = it["size_bytes"]
         if it["kind"] == "delete":
@@ -683,30 +828,35 @@ def main():
                 got = est if ok else 0
             if ok:
                 freed += got
-            results.append({"name": it["name"], "kind": "delete",
+            results.append({"agent": it.get("agent", "codex"), "name": it["name"],
+                            "kind": "delete",
                             "status": "ok" if ok else "failed",
                             "estimated_bytes": est, "actual_bytes": got if ok else 0,
                             "message": msg})
             if not args.json:
                 print(f"  {('✓' if ok else '✗')} {it['name']}: {msg}")
         elif it["kind"] == "vacuum":
-            if allow_vacuum:
+            if args.vacuum and AGENTS.get(it.get("agent", "codex"),
+                                          AGENTS["codex"])["capabilities"]["vacuum"]:
                 # `got` is the measured shrink (before - after), not just the WAL size.
                 ok, msg, got = vacuum_db(Path(it["path"]))
                 freed += got
-                results.append({"name": it["name"], "kind": "vacuum",
+                results.append({"agent": it.get("agent", "codex"), "name": it["name"],
+                                "kind": "vacuum",
                                 "status": "ok" if ok else "failed",
                                 "estimated_bytes": est, "actual_bytes": got,
                                 "message": msg})
                 if not args.json:
                     print(f"  {('✓' if ok else '✗')} {it['name']} (VACUUM): {msg}")
         elif it["kind"] == "rebuild":
-            if allow_rebuild:
+            if args.rebuild_logs and AGENTS.get(it.get("agent", "codex"),
+                                                AGENTS["codex"])["capabilities"]["rebuild_logs"]:
                 ok, msg = rebuild_logs(Path(it["path"]))
                 got = est if ok else 0
                 if ok:
                     freed += got
-                results.append({"name": it["name"], "kind": "rebuild",
+                results.append({"agent": it.get("agent", "codex"), "name": it["name"],
+                                "kind": "rebuild",
                                 "status": "ok" if ok else "failed",
                                 "estimated_bytes": est, "actual_bytes": got,
                                 "message": msg})
@@ -719,7 +869,9 @@ def main():
             "dry_run": False,
             "version": VERSION,
             "agent": args.target,
-            "agent_home": str(home),
+            "targets": targets,
+            "agent_home": str(agent_home(targets[0])) if len(targets) == 1 else None,
+            "agent_homes": {t: str(agent_home(t)) for t in targets},
             "codex_home": str(CODEX_HOME),
             "age_filter_days": args.age if args.age > 0 else None,
             "estimated_bytes": estimated,
@@ -730,7 +882,7 @@ def main():
             "summary": _t("json.est_vs_act", est=human(estimated),
                           act=human(freed), delta=human(freed - estimated)),
             "items": results,
-            "protected_untouched": spec["protected"],
+            "protected_untouched": _protected_union(targets),
         }, ensure_ascii=False, default=str))
         return 0
 
