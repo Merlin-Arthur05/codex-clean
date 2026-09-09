@@ -199,6 +199,82 @@ def main() -> int:
     check("T38 no WAL hint for a small WAL",
           "WAL totals" not in run(["--scan", "--lang", "en"], {"CODEX_HOME": cx}).stdout)
 
+    # ---------------- F4: --list-targets ----------------
+    tgt = json.loads(run(["--list-targets", "--json"]).stdout)
+    check("T39 --list-targets JSON lists every agent",
+          {t["name"] for t in tgt} == {"codex", "claude-code", "pi"},
+          str(sorted(t["name"] for t in tgt)))
+    r = run(["--list-targets", "--lang", "en"])
+    check("T40 --list-targets text mode prints agents + capabilities",
+          "claude-code" in r.stdout and "pi" in r.stdout and "vacuum=" in r.stdout)
+
+    # ---------------- F1: --target all ----------------
+    cx2 = mkhome("all_cx_", [(".tmp/a.bin", 10000)])
+    cc3 = mkhome("all_cc_", [("cache/c.bin", 20000)])
+    pi3 = mkhome("all_pi_", [("cache/p.bin", 30000)])
+    allenv = {"CODEX_HOME": cx2, "CLAUDE_HOME": cc3, "PI_AGENT_HOME": pi3}
+    ritems = json.loads(run(["--scan", "--json", "--target", "all"], allenv).stdout)
+    ags = {i["agent"] for i in ritems}
+    check("T41 --target all covers every agent",
+          ags == {"codex", "claude-code", "pi"}, str(sorted(ags)))
+    r = run(["--scan", "--target", "all", "--lang", "en"], allenv)
+    check("T42 --target all prints one section per agent",
+          r.stdout.count("directory:") >= 3, r.stdout[:120])
+    r = run(["--clean", "--yes", "--target", "all", "--json"], allenv)
+    check("T43 --target all clean runs without crashing", r.returncode == 0,
+          r.stderr[:150])
+    if r.stdout.strip().startswith("{"):
+        rep_all = json.loads(r.stdout)
+        check("T44 --target all report unions protected lists",
+              "sessions" in rep_all.get("protected_untouched", [])
+              and "npm" in rep_all.get("protected_untouched", []))
+    else:
+        check("T44 --target all report unions protected lists", False)
+
+    # ---------------- F2: --exclude / --only ----------------
+    fi = json.loads(run(["--scan", "--json", "--target", "all",
+                         "--exclude", "pi-cache"], allenv).stdout)
+    check("T45 --exclude drops the named item",
+          not any(i["agent"] == "pi" and i["name"] == "pi-cache" for i in fi))
+    fi = json.loads(run(["--scan", "--json", "--target", "all",
+                         "--exclude", "codex"], allenv).stdout)
+    check("T46 --exclude can drop a whole agent",
+          not any(i["agent"] == "codex" for i in fi))
+    fi = json.loads(run(["--scan", "--json", "--target", "all",
+                         "--only", "pi-cache"], allenv).stdout)
+    check("T47 --only keeps just the matching item",
+          [i["name"] for i in fi] == ["pi-cache"], str([i["name"] for i in fi]))
+    fi = json.loads(run(["--scan", "--json", "--target", "all",
+                         "--exclude", "projects,sessions"], allenv).stdout)
+    check("T48 --exclude accepts a comma-separated list",
+          not any(i["name"] in ("projects", "sessions") for i in fi))
+
+    # ---------------- F3: --dry-run ----------------
+    dr = mkclaude()
+    r = run(["--clean", "--yes", "--dry-run", "--target", "claude-code"],
+            {"CLAUDE_HOME": dr})
+    check("T49 --dry-run exits 0", r.returncode == 0, r.stderr[:150])
+    check("T50 --dry-run deletes nothing", (Path(dr) / "cache").exists())
+    rep = json.loads(run(["--clean", "--yes", "--dry-run", "--target",
+                          "claude-code", "--json"], {"CLAUDE_HOME": dr}).stdout)
+    check("T51 --dry-run JSON sets dry_run", rep.get("dry_run") is True)
+    check("T52 --dry-run JSON items are 'planned'",
+          bool(rep.get("items")) and all(i["status"] == "planned" for i in rep["items"]))
+    check("T53 --dry-run protected list still reported",
+          "projects" in rep.get("protected_untouched", []))
+
+    # ---------------- F5: --check N ----------------
+    chk = mkhome("chk_home_", [(".tmp/a.bin", 2 * 1024 * 1024)])
+    r = run(["--scan", "--check", "1"], {"CODEX_HOME": chk})
+    check("T54 --check exits 3 when reclaimable >= threshold",
+          r.returncode == 3, "rc=%d" % r.returncode)
+    r = run(["--scan", "--check", "500"], {"CODEX_HOME": chk})
+    check("T55 --check exits 0 when under threshold",
+          r.returncode == 0, "rc=%d" % r.returncode)
+    r = run(["--scan", "--check", "1", "--json"], {"CODEX_HOME": chk})
+    check("T56 --check still emits JSON and exits 3",
+          r.returncode == 3 and r.stdout.strip().startswith("["))
+
     for d in _tmpdirs:
         shutil.rmtree(d, ignore_errors=True)
 
