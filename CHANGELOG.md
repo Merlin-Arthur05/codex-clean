@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-09
+
+### Added
+- **`--target all`**: sweep every registered agent in one run. Item identity changed
+  from `name` to `(agent, name)` internally so identically named items of different
+  agents can never be confused during confirmation or execution.
+- **`--exclude LIST` / `--only LIST` (#6)**: filter items by `name`, `agent:name`, or a
+  whole agent; comma separated. Filtering can only narrow the whitelist.
+- **`--dry-run`**: print the plan `--clean` would execute (reusing the existing
+  `planned_action` data) without touching anything. JSON mode reports `dry_run: true`
+  and per-item `status: "planned"`.
+- **`--list-targets`**: print supported agents with their resolved home, capabilities and
+  whitelists; `--json` for machine consumption.
+- **`--check N`**: exit code **3** when reclaimable space reaches N MB (0 = off), so
+  scheduled jobs and CI can react without parsing output.
+
+### Changed
+- Scan output groups items per agent (one section per agent when several are selected).
+- Clean JSON report adds `targets`, `agent_homes`, and a per-item `agent` field;
+  `protected_untouched` is the union of the selected agents' protected entries.
+
+### Compatibility
+Backward compatible with v1.4.0: every flag keeps its meaning, single-target behaviour is
+byte-identical, all pre-existing JSON keys are retained and the new ones are additive.
+
+
 ## [1.4.0] - 2026-09-07
 
 ### Added
