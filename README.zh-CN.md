@@ -160,6 +160,23 @@ python scripts/codex_clean.py --scan --lang zh
 # 10. 清理其他 agent（Claude Code）
 python scripts/codex_clean.py --scan --target claude-code
 python scripts/codex_clean.py --clean --yes --target claude-code
+
+# 11. 一次巡检所有 agent
+python scripts/codex_clean.py --scan --target all
+
+# 12. 跳过或只保留指定项（项名或 agent:项名，逗号分隔）
+python scripts/codex_clean.py --scan --target all --exclude "state-db,pi-cache"
+python scripts/codex_clean.py --scan --target all --only claude-cache
+
+# 13. 预演清理，不做任何改动
+python scripts/codex_clean.py --clean --dry-run --target codex
+
+# 14. 查看支持的 agent 及其能力
+python scripts/codex_clean.py --list-targets
+python scripts/codex_clean.py --list-targets --json
+
+# 15. 自动化：可回收达到 500 MB 时以退出码 3 返回
+python scripts/codex_clean.py --scan --check 500
 ```
 
 ### `--age N` 按文件年龄过滤
@@ -257,6 +274,24 @@ cp -r scripts ~/.claude/skills/codex-clean/
     [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11)。
 
 以上均跟踪于 [项目看板](https://github.com/users/Merlin-Arthur05/projects/3)。
+
+## 过滤、预演与自动化
+
+| 参数 | 作用 |
+|---|---|
+| `--target all` | 一次巡检全部已注册的 agent |
+| `--exclude LIST` | 按 `项名` 或 `agent:项名` 跳过（逗号分隔） |
+| `--only LIST` | 只保留列出的项（`--exclude` 的反义） |
+| `--dry-run` | 打印 `--clean` 将要执行的计划，不做任何改动 |
+| `--list-targets` | 打印支持的 agent、其数据目录与能力 |
+| `--check N` | 可回收空间达到 N MB 时以退出码 **3** 返回（0=关闭） |
+
+说明：
+
+- 过滤只能**收窄**白名单。受保护项从来不在扫描结果里，因此任何模式都无法把它"放回"。
+- `--dry-run` 复用 `--json` 扫描输出中已有的 `planned_action` 数据，
+  所以预演与真实执行描述的是同一批动作。
+- 退出码：`0` 正常，`2` 参数错误，`3` 可回收量达到 `--check` 阈值。
 
 ## 测试
 
