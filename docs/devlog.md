@@ -226,3 +226,35 @@ Claude Code 支持包含**两项**：清理目标 + Claude Code 技能。
 - 测试从 28 项扩到 **38/38 通过**，新增 Pi 目标、Pi 保护项（`npm/` 等）存活、
   **sqlite 自动发现后生成 vacuum 项且"不适用"提示消失**（证明非硬编码）、
   `--age` 对 Claude 生效、`--target` 列出三个 agent。
+
+
+## v1.5.0（2026-09-09）：新增 5 项实际功能（非插件机制）
+
+用户澄清"扩展"= **给工具加实际功能**，不是做插件体系。按 09-09 架构审查的优先级落地：
+
+### 功能清单与实现思路
+| # | 功能 | 涉及模块 | 数据结构/接口 | 对现有代码影响 |
+|---|---|---|---|---|
+| F1 | `--target all` | `resolve_targets()` + `main()` | items 标识由 `name` 改为 `(agent, name)`（`_item_key`） | confirm/执行/统计全改用 `_item_key`；JSON 增 `targets`/`agent_homes` |
+| F2 | `--exclude` / `--only`（#6） | `filter_items()` | 匹配 `name` / `agent:name` / agent | scan 后插入一层过滤；**只能收窄白名单** |
+| F3 | `--dry-run` | main 执行前分支 | 复用 `planned_action` | 新增分支，不动执行路径 |
+| F4 | `--list-targets` | `cmd_list_targets()` | 导出 AGENTS 注册表 | 纯新增，scan 前 return |
+| F5 | `--check N` | `_check_exit()` | 退出码 3 | 仅在新 flag 下生效，不动既有 0/2 |
+
+### 关键设计决策
+- **item 标识改为 (agent, name)**：这是 `--target all` 的**必要前提**——
+  不同 agent 可能有同名项，原 `if it["name"] not in confirmed` 会误匹配。
+- **过滤只能收窄**：受保护项本就不在 items 里，故任何 `--only` 都无法把保护项"放回来"，
+  安全契约天然成立。
+- **能力判定下沉到 item**：原先 `allow_vacuum` 是全局标量，多 agent 下失效；
+  改为按 item 的 agent 查 `capabilities`。
+- 显示层抽出 per-agent 循环（原来写死单个 spec/home），顺带让 `main()` 瘦身一点。
+
+### 未做（有意为之）
+- **配置文件接口**（审查里的 P1）：需设计 CLI/env/文件三者优先级，且"配置不得削弱保护清单"
+  要单独论证，留到下一轮，避免本轮一次塞太多。
+
+### 验证
+- 测试 38 → **56 项全通过**（新增 T39–T56 覆盖 5 个功能）。
+- 真实环境：`--list-targets` 列出三 agent 及能力；`--target all` 正确分段输出
+  （Claude 418.7KB + Codex 79MB 等）；`--check 1` 退 3、`--check 99999` 退 0。
