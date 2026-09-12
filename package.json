@@ -1,0 +1,28 @@
+{
+  "name": "codex-clean",
+  "version": "1.6.0",
+  "private": true,
+  "type": "module",
+  "description": "Safe, confirm-before-clean disk-space reclaimer for AI coding agents (Codex, Claude Code, Pi).",
+  "license": "MIT",
+  "keywords": [
+    "pi-package",
+    "codex",
+    "claude-code",
+    "cache-cleaner",
+    "disk-space",
+    "sqlite-vacuum"
+  ],
+  "pi": {
+    "extensions": [
+      "./pi-extension/index.ts"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": []
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

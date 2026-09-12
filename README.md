@@ -4,46 +4,53 @@
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)]()
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-**A safe, confirm-before-clean tool that frees disk space from AI coding agents' cache, logs, and WAL files — built for OpenAI Codex, with more agents on the roadmap. Never touches your conversations, configs, or projects.**
+**A safe, confirm-before-clean tool that frees disk space from AI coding agents' cache, logs, and WAL files. Supports OpenAI Codex, Claude Code, and Pi. Never touches your conversations, configs, or projects.**
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-`codex-clean` targets only the regenerable, self-produced data inside `~/.codex` that grows over time (temporary plugin downloads, plugin cache, the diagnostic `logs_2.sqlite` database and its write-ahead-log, plus bloat in state databases via `VACUUM`). Conversation history, state data, authentication, configuration, and Codex executables are **never** touched. Codex is the first - and currently the only fully supported - agent; pi and opencode are on the roadmap (see [Supported agents](#supported-agents)).
+`codex-clean` targets only the regenerable, self-produced data inside each agent's home directory — temporary downloads, caches, diagnostic logs and their write-ahead-logs, plus bloat in state databases via `VACUUM`. Conversation history, state data, authentication, configuration, and agent executables are **never** touched.
 
-> Also packaged as a [Codex Agent Skill](#install-as-a-codex-skill) (available in [English](SKILL.md) and [简体中文](SKILL.zh-CN.md)): say *"clean Codex cache"* in Codex and it runs scan-confirm-clean for you.
+| Agent | Home | Select with |
+|---|---|---|
+| **OpenAI Codex** (default) | `~/.codex` (`CODEX_HOME`) | *(default)* |
+| **Claude Code** | `~/.claude` (`CLAUDE_HOME`) | `--target claude-code` |
+| **Pi** | `~/.pi/agent` (`PI_AGENT_HOME`) | `--target pi` |
+| *all of the above* | — | `--target all` |
+
+Each agent's home is resolved at runtime from its environment variable, falling back to the default path — nothing is hardcoded to one machine.
+
+> Also packaged as an [Agent Skill](#install-as-a-skill) (available in [English](SKILL.md) and [简体中文](SKILL.zh-CN.md)) for Codex, Claude Code, and Pi: say *"clean my agent cache"* and it runs scan-confirm-clean for you.
 
 ---
 
 ## Supported agents
 
-`codex-clean` is built **primarily for OpenAI Codex**, and is already structured to support more agents. Every agent gets the same scan -> confirm -> clean flow and protected-list safety contract.
+`codex-clean` handles **three agents** today, each with the same scan -> confirm -> clean flow and protected-list safety contract. Adding another is a single entry in the `AGENTS` registry — differences are **data, not branches**.
 
 | Agent | Status | What gets cleaned |
 |---|---|---|
-| **OpenAI Codex** | Supported (current) | `~/.codex` cache, logs, WAL, and state-DB bloat |
-| **pi** - [@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | Planned - v1.4.0 ([#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10)) | `~/.pi` data / cache / logs |
-| **opencode** - [anomalyco/opencode](https://github.com/anomalyco/opencode) | Planned - v1.5.0 ([#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)) | XDG data / log / cache + WAL-mode `opencode.db` |
-| **Claude Code** | Supported (current) |
-| **Pi** | Supported (current) | `~/.pi/agent` cache / tmp / logs (best-effort; no documented cache) | `~/.claude` cache / logs (JSONL data - no SQLite, so VACUUM does not apply) |
+| **OpenAI Codex** | Supported | `~/.codex` tmp, plugin cache, logs, WAL, state-DB bloat |
+| **Claude Code** | Supported | `~/.claude` cache, debug, shell-snapshots, statsig |
+| **Pi** | Supported | `~/.pi/agent` cache, tmp, logs, debug log |
+| **opencode** | Planned — v1.5.0 ([#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)) | XDG data / log / cache + WAL-mode `opencode.db` |
 
-The per-agent registry refactor that makes adding an agent a one-line spec is tracked in [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11); see [Roadmap](#roadmap--ideas).
 ## Not a generic computer cleaner
 
 `codex-clean` does **not** scan your disk, organize files, or clean your whole
 machine. Generic cleanup skills (e.g. `qing-li-dian-nao`) target the entire
-computer; this tool targets the runtime data of **one app — Codex**, and adds
+computer; this tool targets the runtime data of **AI coding agents**, and adds
 capabilities generic cleaners don't have:
 
 | Dimension | codex-clean | Generic computer cleanup |
 |---|---|---|
-| Scope | Only Codex's own `~/.codex` | Whole-machine disk / files |
+| Scope | Only registered agents' own homes (`~/.codex`, `~/.claude`, `~/.pi/agent`) | Whole-machine disk / files |
 | Unique capability | SQLite **VACUUM + WAL checkpoint**, oversized log-DB rebuild | Generic file scanning |
 | Output language | Bilingual (en/zh), follows client language | Single language |
-| Trigger | "Codex cache / logs / disk usage" | "clean my computer / organize files / disk full" |
+| Trigger | "Codex / Claude Code / Pi cache, logs, disk usage" | "clean my computer / organize files / disk full" |
 
 ## Why
 
-Codex (CLI/Desktop) keeps several things under `~/.codex` that grow without bound:
+AI coding agents accumulate regenerable data in their home directory that grows without bound. Codex is a good example (CLI/Desktop), under `~/.codex`:
 
 | Item | Role | Growth |
 |---|---|---|
@@ -51,76 +58,38 @@ Codex (CLI/Desktop) keeps several things under `~/.codex` that grow without boun
 | `~/.codex/plugins/cache` | Plugin cache (re-downloadable) | Depends on plugins |
 | `~/.codex/logs_2.sqlite` | Diagnostic log DB (**not** conversation history) | Reported to reach GBs; WAL adds SSD write amplification |
 
-`logs_2.sqlite` only contains diagnostic logs — deleting or rebuilding it does **not** affect your chat history (that lives in `state_5.sqlite` / `sessions/`), which is why cleaning it is safe.
+`logs_2.sqlite` only contains diagnostic logs — deleting or rebuilding it does **not** affect your chat history (that lives in `state_5.sqlite` / `sessions/`), which is why cleaning it is safe. The same principle applies to every agent: only regenerable data is ever in scope.
 
-## What it cleans (strict whitelist)
+## What it cleans
 
-**A. Delete (regenerable — Codex recreates on demand)**
+Everything below sits inside the selected agent's home. Anything not listed is protected.
 
-| Item | Path |
-|---|---|
-| `tmp` | `~/.codex/.tmp` |
-| `tmp2` | `~/.codex/tmp` |
-| `plugin-cache` | `~/.codex/plugins/cache` |
+| Agent | Deleted (regenerable) | VACUUM + WAL | Rebuild log DB |
+|---|---|---|---|
+| **Codex** | `.tmp/`, `tmp/`, `plugins/cache/` | 6 known SQLite DBs | yes, if `logs_2.sqlite` > 100 MB |
+| **Claude Code** | `cache/`, `debug/`, `shell-snapshots/`, `statsig/` | auto-discovered | not applicable |
+| **Pi** | `cache/`, `tmp/`, `logs/`, `pi-debug.log` | auto-discovered | not applicable |
 
-**B. VACUUM + WAL cleanup (data preserved, space reclaimed)** — runs `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM` on:
-
-`logs_2.sqlite` · `state_5.sqlite` · `thread_history_1.sqlite` · `queue_1.sqlite` · `goals_1.sqlite` · `memories_1.sqlite`
-
-**C. Rebuild oversized log DB (optional)** — if `logs_2.sqlite` exceeds 100 MB, back it up and let Codex recreate an empty one.
+- **VACUUM** runs `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM`: data is preserved, only space is reclaimed.
+- **Auto-discovered** means the scan globs `*.sqlite` / `*.sqlite3` / `*.db` in the agent's home at scan time, rather than relying on a hardcoded list. If an agent has no databases, the flag reports "not applicable" instead of failing.
+- Codex's `logs_2.sqlite` holds **diagnostic logs only** — rebuilding it never touches chat history (that lives in `state_5.sqlite` / `sessions/`).
 
 ## What it NEVER touches
 
-- Codex executables & runtimes: `bin/`, `runtimes/`
-- Conversation history: `sessions/`
-- Data inside state/memory/goals DBs (only VACUUM, never deletion)
-- Config: `config.toml`, `auth.json`, `model-catalogs/`, `backups/`
-- Your project files & work directories
+Every agent's own protected set, enforced by the registry:
 
-## Multi-agent targets
-
-One codebase, one scan -> confirm -> clean flow. Each agent is a single entry in the
-`AGENTS` registry inside the script, so differences are **data, not branches**:
-
-| | Codex (default) | Claude Code | Pi |
-|---|---|---|---|
-| Package | OpenAI Codex | Claude Code | `@earendil-works/pi-coding-agent` |
-| Data directory | `~/.codex` (`CODEX_HOME`) | `~/.claude` (`CLAUDE_HOME`) | `~/.pi/agent` (`PI_AGENT_HOME`) |
-| Data format | SQLite (+ WAL/SHM) | JSONL / plain files | JSONL / plain files |
-| VACUUM + WAL cleanup | yes (6 known DBs) | auto-discovered | auto-discovered |
-| Oversized log-DB rebuild | yes | **not applicable** | **not applicable** |
-| How to select | default | `--target claude-code` | `--target pi` |
-
-What each agent may touch (strict whitelist, everything else is protected):
-
-- **Codex** — cleans `.tmp/`, `tmp/`, `plugins/cache/`; VACUUMs the six SQLite DBs.
-  Protects `sessions/`, `config.toml`, `auth.json`, `skills/`, `rules/`, `backups/`.
-- **Claude Code** — cleans `cache/`, `debug/`, `shell-snapshots/`, `statsig/`.
-  Protects `projects/` (your conversations), `memory/`, `plugins/`, `skills/`,
-  `settings.json`, `config.json`, `sessions/`, `ide/`, `history.jsonl`.
-- **Pi** — cleans `cache/`, `tmp/`, `logs/`.
-  Protects `sessions/` (conversations), `skills/`, `npm/` (**user-installed packages**),
-  `settings.json`, `trust.json`, `auth.json`, `AGENTS.md`, `SYSTEM.md`.
+- **Codex** — `bin/`, `runtimes/`, `sessions/`, `config.toml`, `auth.json`, `skills/`, `rules/`, `model-catalogs/`, `backups/`
+- **Claude Code** — `projects/` (your conversations), `memory/`, `plugins/`, `skills/`, `settings.json`, `config.json`, `sessions/`, `ide/`, `history.jsonl`
+- **Pi** — `sessions/` (conversations), `skills/`, `npm/` (**user-installed packages**), `git/`, `bin/`, `tools/`, `prompts/`, `themes/`, `settings.json`, `trust.json`, `auth.json`, `models.json`, `AGENTS.md`, `SYSTEM.md`
+- **All agents** — data *inside* state databases (VACUUM only, never deletion), and your project files & work directories
 
 ### Known limitations
 
-These are verified constraints of the agents themselves, not gaps in the tool.
+Verified constraints of the agents themselves, not gaps in the tool.
 
-- **`--rebuild-logs` (Claude Code, Pi)** — not applicable. Neither agent has an
-  oversized *diagnostic log database*; their logs are plain files (`debug/` for Claude,
-  `logs/` for Pi) that are already in the delete whitelist, so there is nothing to rebuild.
-  The flag prints a "does not apply" note instead of failing.
-- **`--vacuum` (Claude Code, Pi)** — *not* hardcoded as unsupported. Both declare no fixed
-  DB list and let the scan discover `*.sqlite` / `*.sqlite3` / `*.db` in their home.
-  Verified today: zero such files under `~/.claude`, so there is nothing to shrink and the
-  flag reports "does not apply". If a future release ships a database, VACUUM starts
-  working with no code change.
-- **Pi's cleanable set is best-effort.** The official docs describe only user data under
-  `~/.pi/agent` (`sessions/`, `skills/`, `npm/` = user-installed packages, plus settings).
-  `cache/` / `tmp/` / `logs/` are offered because they are universally regenerable and are
-  only touched if they actually exist; the protected list guarantees user data never is.
-  Pi was not installed on the machine used to verify this, so the set is deliberately
-  conservative.
+- **`--rebuild-logs` (Claude Code, Pi)** — not applicable. Neither has an oversized *diagnostic log database*; their logs are plain files (`debug/` for Claude, `logs/` + `pi-debug.log` for Pi) that are already in the delete whitelist. The flag prints a "does not apply" note instead of failing.
+- **`--vacuum` (Claude Code, Pi)** — *not* hardcoded as unsupported. Both declare no fixed DB list and let the scan discover databases (see above). Verified: zero such files under `~/.claude`, so the flag reports "not applicable" and starts working automatically if a future release ships one.
+- **Pi's cleanable set is best-effort.** Pi's own source documents only user data under `~/.pi/agent` (`sessions/`, `skills/`, `npm/` = user-installed packages, `extensions/`, plus settings). `cache/` / `tmp/` / `logs/` are offered because they are universally regenerable and are only touched if they actually exist; the protected list guarantees user data never is.
 
 ## Install
 
@@ -141,7 +110,7 @@ python scripts/codex_clean.py --scan
 # 2. Interactive: confirm each item before cleaning
 python scripts/codex_clean.py --clean
 
-# 3. Non-interactive: clean all safe "delete + WAL" items
+# 3. Non-interactive: clean all safe items
 python scripts/codex_clean.py --clean --yes
 
 # 4. Recommended full cleanup: also VACUUM the SQLite DBs
@@ -152,36 +121,31 @@ python scripts/codex_clean.py --clean --yes --rebuild-logs
 
 # 6. Only clean temp files older than 7 days (keeps recent files)
 python scripts/codex_clean.py --scan --age 7
-python scripts/codex_clean.py --clean --yes --age 7
 
-# 7. Machine-readable output (includes a per-item "what would happen" preview)
-python scripts/codex_clean.py --scan --json
-
-# 8. JSON cleanup report — estimated vs actually freed
-python scripts/codex_clean.py --clean --yes --vacuum --json
-
-# 9. Choose output language: en | zh | auto (default)
-python scripts/codex_clean.py --scan --lang zh
-
-# 10. Clean a different agent (Claude Code)
+# 7. Pick an agent (Codex is the default)
 python scripts/codex_clean.py --scan --target claude-code
-python scripts/codex_clean.py --clean --yes --target claude-code
+python scripts/codex_clean.py --scan --target pi
 
-# 11. Sweep every agent at once
+# 8. Sweep every agent at once
 python scripts/codex_clean.py --scan --target all
 
-# 12. Skip or keep specific items (name or agent:name, comma separated)
+# 9. Machine-readable output (with a per-item "what would happen" preview)
+python scripts/codex_clean.py --scan --json
+
+# 10. Choose output language: en | zh | auto (default)
+python scripts/codex_clean.py --scan --lang zh
+
+# 11. Skip or keep specific items (name or agent:name, comma separated)
 python scripts/codex_clean.py --scan --target all --exclude "state-db,pi-cache"
 python scripts/codex_clean.py --scan --target all --only claude-cache
 
-# 13. Preview a cleanup without changing anything
+# 12. Preview a cleanup without changing anything
 python scripts/codex_clean.py --clean --dry-run --target codex
 
-# 14. Inspect supported agents and their capabilities
+# 13. Inspect supported agents and their capabilities
 python scripts/codex_clean.py --list-targets
-python scripts/codex_clean.py --list-targets --json
 
-# 15. Automation: exit 3 when reclaimable space reaches 500 MB
+# 14. Automation: exit 3 when reclaimable space reaches 500 MB
 python scripts/codex_clean.py --scan --check 500
 ```
 
@@ -189,7 +153,7 @@ python scripts/codex_clean.py --scan --check 500
 
 With `--age N`, **delete** items only touch files whose modification time is
 older than N days; newer files are left alone. Useful when you don't want to
-wipe an entire cache, and it avoids deleting files Codex may be actively using.
+wipe an entire cache, and it avoids deleting files an agent may be actively using.
 
 - On scan: `size` shows the **eligible** (reclaimable) bytes, `total_size` shows
   the whole directory.
@@ -200,7 +164,7 @@ wipe an entire cache, and it avoids deleting files Codex may be actively using.
 ### `--json` output
 
 **Scan mode** (`--scan --json`) returns an array. Alongside the stable
-`name` / `kind` / `size` keys, each item carries v1.2.0 preview fields:
+`name` / `kind` / `size` keys, each item carries a preview of the action:
 
 ```jsonc
 {
@@ -222,7 +186,7 @@ wipe an entire cache, and it avoids deleting files Codex may be actively using.
 
 ```jsonc
 {
-  "ok": true, "dry_run": false, "version": "1.3.0",
+  "ok": true, "dry_run": false, "version": "1.6.0",
   "estimated_bytes": 215040, "actual_freed_bytes": 204800, "delta_bytes": -10240,
   "items": [
     { "name": "tmp", "kind": "delete", "status": "ok",
@@ -240,54 +204,63 @@ reality landed from the prediction.
 
 **Output language.** User-facing text (scan list, confirm prompts, results, and
 the `--help` screen) is localized. Resolution order: `--lang` argument → `CODEX_CLEAN_LANG` env var →
-`LANG`/`LC_ALL` → OS UI language → English. So in a Chinese client just set
-`CODEX_CLEAN_LANG=zh` (or call with `--lang zh`); English tools get English by
-default. `--json` output uses the localized `desc`/`action` fields with the
-stable `name`/`kind` keys for machine parsing.
+`LANG`/`LC_ALL` → OS UI language → English. `--json` output keeps the stable
+`name`/`kind` keys for machine parsing and localizes only the `desc`/`action` fields.
 
-> **Best practice:** fully quit Codex (CLI, Desktop, IDE extension) before `--clean`, so no process holds an open handle on deleted files — otherwise disk space isn't reclaimed until the process exits.
+> **Best practice:** fully quit the target agent before `--clean`, so no process holds an open handle on deleted files — otherwise disk space isn't reclaimed until the process exits.
 
-## Install as a Codex Skill
+## Install as a Skill
+
+`codex-clean` ships a single `SKILL.md` that follows the **Agent Skills open standard**, so the same body works in Codex, Claude Code, and Pi. Only the install path and the frontmatter differ:
+
+| Agent | Install path | Invoke with |
+|---|---|---|
+| **Codex** | `~/.codex/skills/codex-clean/` | *"clean Codex cache"* |
+| **Claude Code** | `~/.claude/skills/codex-clean/` | **`/codex-clean`** |
+| **Pi** | `~/.pi/agent/skills/codex-clean/` | *"clean my agent cache"* |
 
 ```bash
+# Codex
 mkdir -p ~/.codex/skills/codex-clean
-cp SKILL.md ~/.codex/skills/codex-clean/   # or SKILL.zh-CN.md for the Chinese version
+cp SKILL.md ~/.codex/skills/codex-clean/       # or SKILL.zh-CN.md for Chinese
 cp -r scripts ~/.codex/skills/codex-clean/
+
+# Claude Code — the directory name becomes the slash command
+mkdir -p ~/.claude/skills/codex-clean
+cp SKILL.md ~/.claude/skills/codex-clean/      # add `allowed-tools: Bash, Read` to frontmatter
+cp -r scripts ~/.claude/skills/codex-clean/
+
+# Pi
+mkdir -p ~/.pi/agent/skills/codex-clean
+cp SKILL.md ~/.pi/agent/skills/codex-clean/
+cp -r scripts ~/.pi/agent/skills/codex-clean/
 ```
 
-Then in Codex just say: **"清理 Codex 缓存"** / **"Codex 日志太多"** / **"Codex 占空间"** / **"clean Codex cache"** — it will read the skill, scan, and confirm with you before cleaning.
+Then just ask — the agent reads the skill, scans, and confirms with you before cleaning.
 
-## Install as a Claude Code skill
+## Install as a Pi package
 
-Claude Code follows the **Agent Skills open standard** — the same format used here — so the
-same `SKILL.md` body works; only the location and frontmatter differ:
+The repo is also a Pi package (`package.json` with a `pi` manifest), which gives Pi a native tool + slash command instead of only a skill:
 
 ```bash
-mkdir -p ~/.claude/skills/codex-clean
-cp SKILL.md ~/.claude/skills/codex-clean/   # or SKILL.zh-CN.md for Chinese
-cp -r scripts ~/.claude/skills/codex-clean/
+pi install git:github.com/Merlin-Arthur05/codex-clean
 ```
 
-The **directory name becomes the slash command**, so type **`/codex-clean`** (or just ask
-*"clean my agent cache"*) in Claude Code. Add `allowed-tools: Bash, Read` to the SKILL.md
-frontmatter so it can run the script without an approval prompt.
+This registers:
 
+- **Tools** — `agent_cache_scan`, `agent_cache_clean`, `agent_cache_targets`
+- **Command** — `/clean-agents` (scan → confirm → clean)
+
+The extension is a thin wrapper that shells out to the same Python script, so its behaviour is identical across agents. It resolves `python3` / `py -3` / `python` at runtime and never assumes a fixed interpreter path.
 
 ## Roadmap / Ideas
 
 - Automatic WAL-growth watchdog suggestion (periodic scan reminder).
 - Optional integration as a Windows scheduled task (opt-in only).
-- `--exclude` to skip specific databases.
-- **Multi-agent support** — extend cleanup targets to other AI coding CLIs, applying the
-  same scan-confirm-clean + protected-list rules:
-  - **pi** ([@earendil-works/pi-coding-agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent))
-    — detect its data/cache/log directories (e.g. `~/.pi`). Tracked in [#10](https://github.com/Merlin-Arthur05/codex-clean/issues/10).
-  - **opencode** ([anomalyco/opencode](https://github.com/anomalyco/opencode)) — its XDG
-    data/log/cache directories plus the WAL-mode `opencode.db`
-    (`~/.local/share/opencode/opencode.db` on Linux). Tracked in [#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12).
-  - **Claude Code** - `~/.claude` cache and logs. Conversations are stored as **JSONL, not SQLite**, so VACUUM / log-DB rebuild do not apply; these become per-agent capability flags rather than hardcoded branches. Also ships as a `/codex-clean` slash command ([#14](https://github.com/Merlin-Arthur05/codex-clean/issues/14)). Tracked in [#13](https://github.com/Merlin-Arthur05/codex-clean/issues/13).
-  - Refactor cleanup targets into a **per-agent registry** so adding an agent needs only
-    one spec entry. Tracked in [#11](https://github.com/Merlin-Arthur05/codex-clean/issues/11).
+- **opencode** ([anomalyco/opencode](https://github.com/anomalyco/opencode)) — its XDG
+  data/log/cache directories plus the WAL-mode `opencode.db`. Tracked in [#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12).
+- Opt-in age-based cleaning for Claude Code's `projects/` conversation JSONL (explicit flag + per-item confirmation, never on by default).
+- Runtime process detection, so a clean warns when the target agent is still running ([#8](https://github.com/Merlin-Arthur05/codex-clean/issues/8)).
 
 All tracked on the [project board](https://github.com/users/Merlin-Arthur05/projects/3).
 
@@ -313,11 +286,12 @@ Notes:
 ## Tests
 
 ```bash
-python tests/test_codex_clean.py   # 28 regression checks, standard library only
+python tests/test_codex_clean.py          # 68 regression checks, standard library only
+node   tests/test_pi_extension.mjs        # Pi extension load test (skips if Pi absent)
 ```
 
-The suite points `CODEX_HOME` / `CLAUDE_HOME` at throwaway temp directories, so it never
-touches a real agent home.
+The Python suite points each agent's home env var at throwaway temp directories, so it never
+touches real agent data.
 
 ## License
 

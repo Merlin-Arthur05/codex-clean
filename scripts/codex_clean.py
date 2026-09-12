@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 # Single source of truth: keep in sync with the GitHub Release tag (v1.5.0).
-VERSION = "1.5.0"
+VERSION = "1.6.0"
 
 # Per-agent registry. Adding an agent = one entry here; nothing else branches on
 # the agent. Paths are relative to the agent home and resolved at scan time.
@@ -98,22 +98,26 @@ AGENTS = {
         "label": "Pi",
         "home_env": "PI_AGENT_HOME",
         "home_rel": ".pi/agent",
-        # Verified against the official docs (earendil-works/pi,
-        # packages/coding-agent/docs/settings.md): ~/.pi/agent holds sessions/,
-        # skills/, npm/ (user-installed packages), settings.json, trust.json,
-        # auth.json, AGENTS.md, SYSTEM.md -- all user data, all protected.
-        # No regenerable cache is documented; cache/ tmp/ logs/ are offered
-        # best-effort and only if present (missing dirs are simply reported as
-        # "does not exist", never created or assumed).
+        # Verified against pi source (packages/coding-agent/src/config.ts and
+        # core/package-manager.ts). ~/.pi/agent holds sessions/, skills/,
+        # extensions/, npm/ (node_modules of user-installed packages), git/
+        # (cloned packages), bin/, tools/, prompts/, themes/, settings.json,
+        # trust.json, auth.json, models.json, models-store.json, AGENTS.md,
+        # SYSTEM.md -- all user data, all protected.
+        # Regenerable: tmp/ (incl. tmp/extensions/<hash> package checkouts) and
+        # the debug log. cache/ and logs/ are not documented by pi; they are
+        # kept as best-effort entries and only touched if they actually exist.
         "deletable": [
             ("pi-cache", "cache", "desc.pi-cache"),
             ("pi-tmp", "tmp", "desc.pi-tmp"),
             ("pi-logs", "logs", "desc.pi-logs"),
+            ("pi-debug-log", "pi-debug.log", "desc.pi-debug-log"),
         ],
         "dbs": [],
         "protected": [
-            "sessions", "skills", "npm", "settings.json", "trust.json",
-            "auth.json", "AGENTS.md", "SYSTEM.md",
+            "sessions", "skills", "extensions", "npm", "git", "bin", "tools",
+            "prompts", "themes", "settings.json", "trust.json", "auth.json",
+            "AGENTS.md", "SYSTEM.md", "models.json", "models-store.json",
         ],
         "rebuild_db": None,
         "discover_dbs": True,
@@ -194,6 +198,7 @@ _MSGS = {
         "desc.pi-cache": "Pi cache (regenerable; best-effort, cleaned only if present)",
         "desc.pi-tmp": "Pi temp files (regenerable; best-effort)",
         "desc.pi-logs": "Pi logs (regenerable; best-effort)",
+        "desc.pi-debug-log": "Pi debug log (regenerable)",
         "desc.discovered-db": "Auto-discovered SQLite DB (VACUUM/WAL only, data kept)",
         "arg.exclude": "comma-separated item or agent:item names to skip",
         "arg.only": "comma-separated item or agent:item names to keep (inverse of --exclude)",
@@ -269,6 +274,7 @@ _MSGS = {
         "desc.pi-cache": "Pi 缓存(可再生; 尽力而为, 仅当存在时清理)",
         "desc.pi-tmp": "Pi 临时文件(可再生; 尽力而为)",
         "desc.pi-logs": "Pi 日志(可再生; 尽力而为)",
+        "desc.pi-debug-log": "Pi 调试日志(可再生)",
         "desc.discovered-db": "自动发现的 SQLite 库(仅VACUUM/WAL, 保留数据)",
         "arg.exclude": "逗号分隔的项名或 agent:项名, 跳过这些项",
         "arg.only": "逗号分隔的项名或 agent:项名, 只保留这些项(--exclude 的反义)",

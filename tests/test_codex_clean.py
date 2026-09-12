@@ -57,6 +57,14 @@ def mkhome(prefix, files):
     return d
 
 
+def _script_version():
+    """Read VERSION from the script (single source of truth for releases)."""
+    for line in SCRIPT.read_text(encoding="utf-8").splitlines():
+        if line.startswith("VERSION"):
+            return line.split("=", 1)[1].strip().strip('"')
+    return None
+
+
 def mkclaude():
     """Fresh fake ~/.claude with both cleanable and protected content."""
     return mkhome("cc_home_", [
@@ -66,12 +74,20 @@ def mkclaude():
 
 
 def mkpi():
-    """Fresh fake ~/.pi/agent with cleanable + protected content."""
+    """Fresh fake ~/.pi/agent with cleanable + protected content.
+
+    Mirrors the real layout from pi's source: tmp/extensions/<hash> holds
+    temporary package checkouts, npm/ holds user-installed packages, and the
+    debug log lives at the agent root.
+    """
     return mkhome("pi_home_", [
         ("cache/c.bin", 30000), ("tmp/t.bin", 20000),
+        ("tmp/extensions/ab12cd34/node_modules/x/index.js", 5000),
+        ("pi-debug.log", 3000),
         ("npm/pkg/index.js", 8000), ("sessions/s.jsonl", 5000),
-        ("skills/s/SKILL.md", 1000), ("settings.json", 100),
-        ("trust.json", 100), ("auth.json", 100)])
+        ("skills/s/SKILL.md", 1000), ("extensions/ext.ts", 900),
+        ("settings.json", 100), ("trust.json", 100),
+        ("auth.json", 100), ("models.json", 100)])
 
 
 def main() -> int:
@@ -146,21 +162,74 @@ def main() -> int:
     pnames = [i["name"] for i in pitems]
     check("T23 pi target scans its own home", all(i["agent"] == "pi" for i in pitems))
     check("T24 pi emits only whitelisted deletes",
-          set(pnames) == {"pi-cache", "pi-tmp", "pi-logs"}, str(sorted(pnames)))
+          set(pnames) == {"pi-cache", "pi-tmp", "pi-logs", "pi-debug-log"},
+          str(sorted(pnames)))
     check("T25 pi protects npm/ (user-installed packages)",
           "npm" not in pnames and "sessions" not in pnames and "skills" not in pnames)
     check("T26 pi missing logs dir tolerated",
           all(i["exists"] is False for i in pitems if i["name"] == "pi-logs"))
-    check("T27 pi reclaimable = cache + tmp only",
-          sum(i["reclaimable_bytes"] for i in pitems if i["exists"]) == 50000)
+    check("T27 pi reclaimable = cache + tmp (+tmp/extensions) + debug log",
+          sum(i["reclaimable_bytes"] for i in pitems if i["exists"]) == 58000)
     r = run(["--clean", "--yes", "--target", "pi", "--lang", "en"], {"PI_AGENT_HOME": pi})
     check("T28 pi clean succeeded", r.returncode == 0, r.stderr[:200])
     check("T29 pi cache + tmp deleted",
           not (Path(pi) / "cache").exists() and not (Path(pi) / "tmp").exists())
-    check("T30 pi PROTECTED survived (npm/sessions/skills/settings/trust/auth)",
+    check("T30 pi PROTECTED survived (npm/sessions/skills/extensions/settings/trust/auth/models)",
           all((Path(pi) / p).exists() for p in ("npm/pkg/index.js", "sessions/s.jsonl",
-                                                "skills/s/SKILL.md", "settings.json",
-                                                "trust.json", "auth.json")))
+                                                "skills/s/SKILL.md", "extensions/ext.ts",
+                                                "settings.json", "trust.json",
+                                                "auth.json", "models.json")))
+
+    # ---------------- Pi plugin / package ecosystem ----------------
+    pifx = mkhome("pi_plug_", [
+        ("tmp/extensions/deadbeef/npm/node_modules/pkg/i.js", 12000),
+        ("tmp/t.log", 4000), ("pi-debug.log", 2000),
+        ("npm/node_modules/userpkg/index.js", 7000),
+        ("git/github.com/u/r/file.ts", 6000),
+        ("extensions/my-ext.ts", 5000), ("skills/s/SKILL.md", 3000),
+        ("sessions/s.jsonl", 1000), ("settings.json", 100),
+        ("trust.json", 100), ("auth.json", 100), ("models.json", 100)])
+    plug = json.loads(run(["--scan", "--json", "--target", "pi", "--lang", "en"],
+                          {"PI_AGENT_HOME": pifx}).stdout)
+    pn = {i["name"]: i for i in plug}
+    check("T57 pi cleans its debug log",
+          "pi-debug-log" in pn and pn["pi-debug-log"]["exists"])
+    check("T58 pi tmp covers nested extension checkouts",
+          "pi-tmp" in pn
+          and pn["pi-tmp"]["path"].replace("\\", "/").endswith("/tmp")
+          and pn["pi-tmp"]["reclaimable_bytes"] == 16000,
+          str({k: v["reclaimable_bytes"] for k, v in pn.items()}))
+    check("T59 pi reclaimable excludes user packages and clones",
+          sum(i["reclaimable_bytes"] for i in plug if i["exists"]) == 18000,
+          str(sum(i["reclaimable_bytes"] for i in plug if i["exists"])))
+    r = run(["--clean", "--yes", "--target", "pi", "--lang", "en"], {"PI_AGENT_HOME": pifx})
+    check("T60 pi plugin cleanup succeeds", r.returncode == 0, r.stderr[:200])
+    check("T61 pi tmp/ and debug log removed",
+          not (Path(pifx) / "tmp").exists() and not (Path(pifx) / "pi-debug.log").exists())
+    check("T62 pi user packages + git clones + extensions + skills survived",
+          all((Path(pifx) / p).exists() for p in (
+              "npm/node_modules/userpkg/index.js", "git/github.com/u/r/file.ts",
+              "extensions/my-ext.ts", "skills/s/SKILL.md", "sessions/s.jsonl",
+              "settings.json", "trust.json", "auth.json", "models.json")))
+
+    # ---------------- Pi package manifest (pi install) ----------------
+    pkgjson = Path(__file__).resolve().parent.parent / "package.json"
+    if pkgjson.exists():
+        pk = json.loads(pkgjson.read_text(encoding="utf-8"))
+        check("T63 package.json declares a pi manifest", "pi" in pk)
+        check("T64 pi manifest points at the extension",
+              any("pi-extension" in e for e in pk.get("pi", {}).get("extensions", [])),
+              str(pk.get("pi", {}).get("extensions")))
+        check("T65 pi manifest exposes the skill directory",
+              any("skills" in e for e in pk.get("pi", {}).get("skills", [])),
+              str(pk.get("pi", {}).get("skills")))
+        check("T66 package version matches script VERSION",
+              pk.get("version") == _script_version(),
+              f"{pk.get('version')} vs {_script_version()}")
+        check("T67 extension entry file exists",
+              (Path(__file__).resolve().parent.parent / "pi-extension" / "index.ts").exists())
+        check("T68 packaged skill is present",
+              (Path(__file__).resolve().parent.parent / "skills" / "codex-clean" / "SKILL.md").exists())
 
     # ---------------- VACUUM is data-driven, not hardcoded ----------------
     ccdb = mkclaude()

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-09-12
+
+### Added
+- **Pi package / extension (#10)**: the repo is now installable as a Pi package
+  (`package.json` with a `pi` manifest). It registers three tools — `agent_cache_scan`,
+  `agent_cache_clean`, `agent_cache_targets` — and the `/clean-agents` command (scan ->
+  confirm -> clean). The extension is a thin wrapper over the same Python script, so
+  behaviour is identical in every agent, and it probes `python3` / `py -3` / `python` at
+  runtime instead of assuming a fixed interpreter path.
+- **Portable agent resolution**: every agent home is resolved from its environment
+  variable (`CODEX_HOME` / `CLAUDE_HOME` / `PI_AGENT_HOME`) with a fallback to the default
+  path, so nothing is tied to a specific machine. Pi's real layout was verified against
+  the source (`src/config.ts`, `src/core/package-manager.ts`), which corrected the earlier
+  `pi-plugin-cache` entry — Pi's `tmp/extensions/<hash>/` checkouts are now counted and
+  `npm/`, `git/`, `extensions/`, `bin/`, `tools/` are explicitly protected.
+- **`tests/test_pi_extension.mjs`**: loads `pi-extension/index.ts` through Pi's own
+  `discoverAndLoadExtensions`, asserting the registered tools, their schemas and the
+  confirmation gate. Skips cleanly (exit 0) when Pi is not installed.
+
+### Changed
+- READMEs condensed and unified: one feature/whitelist/protection table covering all
+  three agents, one install section per channel (skill / Pi package), and a trimmed
+  roadmap. Fixed malformed "Supported agents" table rows and removed claims that no
+  longer matched reality (Pi's stale "planned v1.4.0" row).
+- Test suite 56 -> **68** checks.
+
+### Compatibility
+Backward compatible with v1.5.0: no flag changed meaning, and the default target is still
+Codex.
+
 ## [1.5.0] - 2026-09-09
 
 ### Added
