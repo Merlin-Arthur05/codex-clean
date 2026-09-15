@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)]()
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![CI](https://github.com/Merlin-Arthur05/codex-clean/actions/workflows/ci.yml/badge.svg)](https://github.com/Merlin-Arthur05/codex-clean/actions/workflows/ci.yml)
 
 **A safe, confirm-before-clean tool that frees disk space from AI coding agents' cache, logs, and WAL files. Supports OpenAI Codex, Claude Code, and Pi. Never touches your conversations, configs, or projects.**
 
@@ -15,6 +16,7 @@
 | **OpenAI Codex** (default) | `~/.codex` (`CODEX_HOME`) | *(default)* |
 | **Claude Code** | `~/.claude` (`CLAUDE_HOME`) | `--target claude-code` |
 | **Pi** | `~/.pi/agent` (`PI_AGENT_HOME`) | `--target pi` |
+| **opencode** | `~/.local/share/opencode` (`XDG_DATA_HOME`) | `--target opencode` |
 | *all of the above* | — | `--target all` |
 
 Each agent's home is resolved at runtime from its environment variable, falling back to the default path — nothing is hardcoded to one machine.
@@ -32,7 +34,7 @@ Each agent's home is resolved at runtime from its environment variable, falling 
 | **OpenAI Codex** | Supported | `~/.codex` tmp, plugin cache, logs, WAL, state-DB bloat |
 | **Claude Code** | Supported | `~/.claude` cache, debug, shell-snapshots, statsig |
 | **Pi** | Supported | `~/.pi/agent` cache, tmp, logs, debug log |
-| **opencode** | Planned — v1.5.0 ([#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)) | XDG data / log / cache + WAL-mode `opencode.db` |
+| **opencode** | Supported | `log/`, `cache/`, `tmp/`, and `opencode.db` WAL |
 
 ## Not a generic computer cleaner
 
@@ -69,6 +71,7 @@ Everything below sits inside the selected agent's home. Anything not listed is p
 | **Codex** | `.tmp/`, `tmp/`, `plugins/cache/` | 6 known SQLite DBs | yes, if `logs_2.sqlite` > 100 MB |
 | **Claude Code** | `cache/`, `debug/`, `shell-snapshots/`, `statsig/` | auto-discovered | not applicable |
 | **Pi** | `cache/`, `tmp/`, `logs/`, `pi-debug.log` | auto-discovered | not applicable |
+| **opencode** | `log/`, `cache/`, `tmp/` | `opencode.db` (WAL) | not applicable |
 
 - **VACUUM** runs `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM`: data is preserved, only space is reclaimed.
 - **Auto-discovered** means the scan globs `*.sqlite` / `*.sqlite3` / `*.db` in the agent's home at scan time, rather than relying on a hardcoded list. If an agent has no databases, the flag reports "not applicable" instead of failing.
@@ -81,6 +84,7 @@ Every agent's own protected set, enforced by the registry:
 - **Codex** — `bin/`, `runtimes/`, `sessions/`, `config.toml`, `auth.json`, `skills/`, `rules/`, `model-catalogs/`, `backups/`
 - **Claude Code** — `projects/` (your conversations), `memory/`, `plugins/`, `skills/`, `settings.json`, `config.json`, `sessions/`, `ide/`, `history.jsonl`
 - **Pi** — `sessions/` (conversations), `skills/`, `npm/` (**user-installed packages**), `git/`, `bin/`, `tools/`, `prompts/`, `themes/`, `settings.json`, `trust.json`, `auth.json`, `models.json`, `AGENTS.md`, `SYSTEM.md`
+- **opencode** — `repos/` (cloned user repos), `config/`, `state/` (lock files), `auth.json`
 - **All agents** — data *inside* state databases (VACUUM only, never deletion), and your project files & work directories
 
 ### Known limitations
@@ -89,6 +93,7 @@ Verified constraints of the agents themselves, not gaps in the tool.
 
 - **`--rebuild-logs` (Claude Code, Pi)** — not applicable. Neither has an oversized *diagnostic log database*; their logs are plain files (`debug/` for Claude, `logs/` + `pi-debug.log` for Pi) that are already in the delete whitelist. The flag prints a "does not apply" note instead of failing.
 - **`--vacuum` (Claude Code, Pi)** — *not* hardcoded as unsupported. Both declare no fixed DB list and let the scan discover databases (see above). Verified: zero such files under `~/.claude`, so the flag reports "not applicable" and starts working automatically if a future release ships one.
+- **opencode's paths surprise people on Windows.** opencode resolves its directories with `xdg-basedir@5.1.0`, which has **no** macOS/Windows fallback, so the XDG roots are used verbatim on every platform: the data directory is `~/.local/share/opencode`, *not* `%LOCALAPPDATA%`. Its cache and temp directories live under separate roots (`XDG_CACHE_HOME` and the OS temp dir), which is why the registry supports multiple roots for this agent.
 - **Pi's cleanable set is best-effort.** Pi's own source documents only user data under `~/.pi/agent` (`sessions/`, `skills/`, `npm/` = user-installed packages, `extensions/`, plus settings). `cache/` / `tmp/` / `logs/` are offered because they are universally regenerable and are only touched if they actually exist; the protected list guarantees user data never is.
 
 ## Install
@@ -145,7 +150,13 @@ python scripts/codex_clean.py --clean --dry-run --target codex
 # 13. Inspect supported agents and their capabilities
 python scripts/codex_clean.py --list-targets
 
-# 14. Automation: exit 3 when reclaimable space reaches 500 MB
+# 14. Clean opencode
+python scripts/codex_clean.py --scan --target opencode
+
+# 15. Skip the running-process check (for unattended jobs)
+python scripts/codex_clean.py --clean --yes --ignore-running
+
+# 16. Automation: exit 3 when reclaimable space reaches 500 MB
 python scripts/codex_clean.py --scan --check 500
 ```
 
@@ -206,6 +217,10 @@ reality landed from the prediction.
 the `--help` screen) is localized. Resolution order: `--lang` argument → `CODEX_CLEAN_LANG` env var →
 `LANG`/`LC_ALL` → OS UI language → English. `--json` output keeps the stable
 `name`/`kind` keys for machine parsing and localizes only the `desc`/`action` fields.
+
+### Running-process check
+
+Before cleaning, the tool checks whether the selected agent is still running. A live process may hold open handles on deleted files, so the space only comes back once it exits. On a hit it prints a warning — to stderr in `--json` mode, so stdout stays parseable. Interactively it asks for confirmation; with `--yes` it warns and continues, so unattended jobs are never blocked. Use `--ignore-running` to skip the check. Detection is best-effort and stdlib-only (`tasklist` on Windows, `/proc` on Linux, `ps` on macOS): if it fails, nothing is reported and cleaning proceeds.
 
 > **Best practice:** fully quit the target agent before `--clean`, so no process holds an open handle on deleted files — otherwise disk space isn't reclaimed until the process exits.
 
@@ -286,7 +301,7 @@ Notes:
 ## Tests
 
 ```bash
-python tests/test_codex_clean.py          # 68 regression checks, standard library only
+python tests/test_codex_clean.py          # 80 regression checks, standard library only
 node   tests/test_pi_extension.mjs        # Pi extension load test (skips if Pi absent)
 ```
 

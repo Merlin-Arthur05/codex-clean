@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-09-15
+
+### Added
+- **opencode support (#12)**: `--target opencode` cleans `log/`, `cache/` and
+  `tmp/`, and VACUUMs `opencode.db` (WAL). Paths verified against opencode's own
+  source (`packages/core/src/global.ts`) together with `xdg-basedir@5.1.0`, the
+  version it declares. Note for Windows users: `xdg-basedir` 5.x has **no**
+  platform fallback, so the data directory is `~/.local/share/opencode` and not
+  `%LOCALAPPDATA%`. Protects `repos/` (cloned user repos), `config/`, `state/`
+  (Flock lock files) and `auth.json`.
+- **Multi-root registry**: agents may now declare extra roots beyond their home,
+  because opencode keeps its cache under `XDG_CACHE_HOME` and its temp files
+  under the OS temp dir — neither lives under its data home. Item paths use an
+  `@root[/sub]` form; `home_sub` covers env vars that name a root rather than
+  the agent's own directory. Existing agents are unaffected.
+- **Running-process check (#8)**: before cleaning, the tool looks for a running
+  process belonging to the selected agent (stdlib only — `tasklist` on Windows,
+  `/proc` on Linux, `ps` on macOS) and warns that open handles delay space
+  reclamation. Interactively it asks for confirmation; with `--yes` it warns and
+  continues so unattended jobs are never blocked. `--ignore-running` skips it.
+  Detection failure reports nothing rather than blocking a clean.
+- **CI (#9)**: `.github/workflows/ci.yml` runs the regression suite on Python
+  3.8/3.10/3.12/3.13 across Ubuntu, macOS and Windows, plus a smoke scan and a
+  Pi extension load test.
+
+### Fixed
+- The running-process warning was printed to stdout, which corrupted `--json`
+  output for automation. It now goes to stderr when `--json` is set.
+
+### Changed
+- Test suite 68 -> **80** checks.
+- Tests for opencode assert each root resolves independently; process-detection
+  tests drive `main()` in-process with a faked process list so the JSON-purity
+  guarantee is checked deterministically.
+
+### Compatibility
+Backward compatible with v1.6.0: `--target` and every other flag keep their
+meaning, the default target is still Codex, and agents without a `roots` key
+resolve exactly as before.
+
 ## [1.6.0] - 2026-09-12
 
 ### Added

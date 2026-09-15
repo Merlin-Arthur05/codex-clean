@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: py${{ matrix.python }} / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python: ["3.8", "3.10", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Regression suite
+        run: python tests/test_codex_clean.py
+
+      - name: Smoke scan on a throwaway home
+        shell: bash
+        env:
+          CODEX_HOME: ${{ runner.temp }}/fake-codex
+        run: |
+          python -c "
+          import os, pathlib
+          h = pathlib.Path(os.environ['CODEX_HOME'])
+          (h / '.tmp').mkdir(parents=True, exist_ok=True)
+          (h / 'plugins' / 'cache').mkdir(parents=True, exist_ok=True)
+          (h / '.tmp' / 'a.bin').write_bytes(b'x' * 4096)
+          (h / 'plugins' / 'cache' / 'b.bin').write_bytes(b'y' * 2048)
+          print('fixture:', h)
+          "
+          python scripts/codex_clean.py --scan --lang en
+          python scripts/codex_clean.py --scan --json --lang en
+          python scripts/codex_clean.py --list-targets
+          python scripts/codex_clean.py --clean --yes --dry-run --lang en
+
+      - name: Smoke scan across every agent
+        shell: bash
+        run: python scripts/codex_clean.py --scan --target all --lang en
+
+  pi-extension:
+    name: Pi extension load test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Installed only so the load test can exercise Pi's real loader; without
+      # it the test skips instead of failing.
+      - name: Install Pi
+        run: npm install --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent
+
+      - name: Load extension through Pi
+        run: node tests/test_pi_extension.mjs

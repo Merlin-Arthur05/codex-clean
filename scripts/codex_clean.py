@@ -2,13 +2,15 @@
 # -*- coding: utf-8 -*-
 """Clean regenerable cache/log/WAL files of AI coding agents (whitelist, confirm before clean).
 
-Agents live in the AGENTS registry: codex (default) and claude-code. Per-agent
-differences (home path, data format, optional capabilities such as VACUUM) are
-data, not branches. Protected data (conversations, config, projects) is never touched.
+Agents live in the AGENTS registry: codex (default), claude-code, pi and
+opencode. Per-agent differences (home path, data format, optional capabilities
+such as VACUUM) are data, not branches. Protected data (conversations, config,
+projects) is never touched.
 
 Usage: codex_clean.py [--scan | --clean] [--age N] [--vacuum] [--rebuild-logs]
-                      [--target codex|claude-code|pi|all] [--exclude LIST] [--only LIST]
-                      [--dry-run] [--list-targets] [--check N]
+                      [--target codex|claude-code|pi|opencode|all] [--exclude LIST]
+                      [--only LIST] [--dry-run] [--list-targets] [--check N]
+                      [--ignore-running]
                       [--json] [--lang en|zh|auto] [--yes]
 Lang order: --lang > CODEX_CLEAN_LANG > LANG/LC_ALL > OS UI lang > en.
 Exit codes: 0 ok, 2 bad args, 3 reclaimable reached --check threshold.
@@ -20,12 +22,14 @@ import json
 import os
 import shutil
 import sqlite3
+import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
-# Single source of truth: keep in sync with the GitHub Release tag (v1.5.0).
-VERSION = "1.6.0"
+# Single source of truth: keep in sync with the GitHub Release tag (v1.7.0).
+VERSION = "1.7.0"
 
 # Per-agent registry. Adding an agent = one entry here; nothing else branches on
 # the agent. Paths are relative to the agent home and resolved at scan time.
@@ -72,6 +76,8 @@ AGENTS = {
         "rebuild_db": "logs-db",
         "discover_dbs": False,
         "capabilities": {"vacuum": True, "rebuild_logs": True},
+        # Desktop ships as an Appx package, hence the dotted name.
+        "procs": ["codex", "openai.codex", "chatgpt"],
     },
     "claude-code": {
         "label": "Claude Code",
@@ -93,6 +99,7 @@ AGENTS = {
         "rebuild_db": None,
         "discover_dbs": True,
         "capabilities": {"vacuum": True, "rebuild_logs": False},
+        "procs": ["claude"],
     },
     "pi": {
         "label": "Pi",
@@ -122,15 +129,88 @@ AGENTS = {
         "rebuild_db": None,
         "discover_dbs": True,
         "capabilities": {"vacuum": True, "rebuild_logs": False},
+        "procs": ["pi"],
+    },
+    "opencode": {
+        "label": "opencode",
+        # opencode spreads its data across SEVERAL XDG roots, so it needs the
+        # extra-roots mechanism (see `roots`) instead of a single home dir.
+        "home_env": "XDG_DATA_HOME",
+        "home_rel": ".local/share",
+        "home_sub": "opencode",
+        # Verified against opencode source (packages/core/src/global.ts) and
+        # xdg-basedir@5.1.0, the version it declares. xdg-basedir 5.x has NO
+        # macOS/Windows fallback, so the XDG roots are used verbatim on every
+        # platform: on Windows the data dir is ~/.local/share/opencode, NOT
+        # %LOCALAPPDATA%. Counter-intuitive, hence spelled out here.
+        #   data  = $XDG_DATA_HOME/opencode  | ~/.local/share/opencode
+        #   cache = $XDG_CACHE_HOME/opencode | ~/.cache/opencode
+        #   tmp   = os.tmpdir()/opencode
+        #   log   = data/log    bin = cache/bin    repos = data/repos
+        #   db    = data/opencode.db (journal_mode=WAL, per database.ts)
+        # OPENCODE_TEST_HOME is test-only and OPENCODE_CONFIG_DIR redirects
+        # only the config dir, so neither is used to resolve the data home.
+        "deletable": [
+            ("opencode-log", "log", "desc.opencode-log"),
+            ("opencode-cache", "@cache", "desc.opencode-cache"),
+            ("opencode-tmp", "@tmp", "desc.opencode-tmp"),
+        ],
+        "dbs": [
+            ("opencode-db", "opencode.db", "desc.opencode-db"),
+        ],
+        # repos/ holds cloned user repos; state/ holds Flock lock files.
+        "protected": ["repos", "config", "state", "auth.json"],
+        "rebuild_db": None,
+        "discover_dbs": True,
+        "capabilities": {"vacuum": True, "rebuild_logs": False},
+        "procs": ["opencode"],
+        "roots": {
+            # name -> env override, subdir joined onto that env value, and the
+            # default used when the env var is unset.
+            "cache": {"env": "XDG_CACHE_HOME", "dir": "opencode",
+                      "base": "home", "default": ".cache/opencode"},
+            "tmp": {"env": "OPENCODE_TMPDIR", "dir": "opencode",
+                    "base": "tmp", "default": "opencode"},
+        },
     },
 }
 
 
 
 def agent_home(target: str) -> Path:
-    """Resolve an agent's data directory (env override wins, mirroring CODEX_HOME)."""
+    """Resolve an agent's data directory (env override wins, mirroring CODEX_HOME).
+
+    `home_sub` is appended in BOTH branches. It exists for agents whose env var
+    names a *root* rather than the agent's own directory: opencode reads
+    XDG_DATA_HOME, which is the shared XDG root, not an opencode directory.
+    """
     spec = AGENTS[target]
-    return Path(os.environ.get(spec["home_env"]) or (Path.home() / spec["home_rel"]))
+    base = Path(os.environ.get(spec["home_env"]) or (Path.home() / spec["home_rel"]))
+    sub = spec.get("home_sub")
+    return base / sub if sub else base
+
+
+def agent_root(target: str, name: str) -> Path:
+    """Resolve a secondary directory from an agent's `roots` map.
+
+    Needed by agents that spread data over several roots -- opencode keeps its
+    cache under XDG_CACHE_HOME and its temp files under the OS temp dir, and
+    neither lives under its data home.
+    """
+    r = AGENTS[target]["roots"][name]
+    if os.environ.get(r["env"]):
+        return Path(os.environ[r["env"]]) / r["dir"]
+    base = Path.home() if r.get("base", "home") == "home" else Path(tempfile.gettempdir())
+    return base / r["default"]
+
+
+def resolve_item_path(target: str, home: Path, rel: str) -> Path:
+    """Resolve a registry item path, honouring `@root[/sub]` secondary roots."""
+    if not rel.startswith("@"):
+        return home / rel
+    root_name, _, sub = rel[1:].partition("/")
+    base = agent_root(target, root_name)
+    return base / sub if sub else base
 
 # i18n
 _MSGS = {
@@ -199,6 +279,15 @@ _MSGS = {
         "desc.pi-tmp": "Pi temp files (regenerable; best-effort)",
         "desc.pi-logs": "Pi logs (regenerable; best-effort)",
         "desc.pi-debug-log": "Pi debug log (regenerable)",
+        "desc.opencode-log": "opencode log directory (regenerable)",
+        "desc.opencode-cache": "opencode cache incl. downloaded binaries (re-downloadable)",
+        "desc.opencode-tmp": "opencode temp files (regenerable)",
+        "desc.opencode-db": "opencode state DB (VACUUM/WAL only, data kept)",
+        "proc.running": "{label} appears to be running ({procs})",
+        "proc.hint": "A live process may hold open handles on deleted files, so the space is not reclaimed until it exits.",
+        "proc.hint2": "Best practice: quit the agent first, or pass --ignore-running to skip this check.",
+        "proc.prompt": "Continue anyway? (y/N):",
+        "arg.ignorerunning": "skip the running-process check before cleaning",
         "desc.discovered-db": "Auto-discovered SQLite DB (VACUUM/WAL only, data kept)",
         "arg.exclude": "comma-separated item or agent:item names to skip",
         "arg.only": "comma-separated item or agent:item names to keep (inverse of --exclude)",
@@ -275,6 +364,15 @@ _MSGS = {
         "desc.pi-tmp": "Pi 临时文件(可再生; 尽力而为)",
         "desc.pi-logs": "Pi 日志(可再生; 尽力而为)",
         "desc.pi-debug-log": "Pi 调试日志(可再生)",
+        "desc.opencode-log": "opencode 日志目录(可再生)",
+        "desc.opencode-cache": "opencode 缓存, 含已下载的可执行文件(可重新下载)",
+        "desc.opencode-tmp": "opencode 临时文件(可再生)",
+        "desc.opencode-db": "opencode 状态库(仅 VACUUM/WAL, 保留数据)",
+        "proc.running": "{label} 似乎正在运行({procs})",
+        "proc.hint": "运行中的进程可能仍持有被删除文件的句柄, 磁盘空间要等它退出后才真正释放。",
+        "proc.hint2": "最佳实践: 先退出该 agent, 或用 --ignore-running 跳过此检查。",
+        "proc.prompt": "仍要继续吗? (y/N):",
+        "arg.ignorerunning": "跳过清理前的进程占用检查",
         "desc.discovered-db": "自动发现的 SQLite 库(仅VACUUM/WAL, 保留数据)",
         "arg.exclude": "逗号分隔的项名或 agent:项名, 跳过这些项",
         "arg.only": "逗号分隔的项名或 agent:项名, 只保留这些项(--exclude 的反义)",
@@ -425,7 +523,7 @@ def scan(age_days: int = 0, target: str = "codex"):
     caps = spec["capabilities"]
     items = []
     for name, rel, dkey in spec["deletable"]:
-        path = home / rel
+        path = resolve_item_path(target, home, rel)
         eb, ec, tb, tc = _age_stats(path, age_days)
         # With an age filter only the eligible bytes are actually reclaimable.
         sz = eb if age_days > 0 else tb
@@ -453,7 +551,7 @@ def scan(age_days: int = 0, target: str = "codex"):
                     if p.is_file() and all(p.name != r for _n, r, _k in db_specs):
                         db_specs.append((p.stem, p.name, "desc.discovered-db"))
         for name, rel, dkey in db_specs:
-            db_path = home / rel
+            db_path = resolve_item_path(target, home, rel)
             main, wal, shm = _db_sizes(db_path)
             total = main + wal + shm
             has_db = db_path.exists()
@@ -663,6 +761,61 @@ def _check_exit(items, args) -> int:
 
 
 # CLI
+def _running_process_names() -> set:
+    """Best-effort set of lowercased running process names (stdlib only).
+
+    Returns an empty set when detection is unavailable. A failed probe must
+    never block a clean -- only a positive match may warn.
+    """
+    names = set()
+    try:
+        if os.name == "nt":
+            out = subprocess.run(["tasklist", "/FO", "CSV", "/NH"],
+                                 capture_output=True, text=True, timeout=15)
+            for line in out.stdout.splitlines():
+                first = line.split(",")[0].strip().strip('"')
+                if first:
+                    names.add(first.lower())
+        elif os.path.isdir("/proc"):
+            for entry in os.listdir("/proc"):
+                if not entry.isdigit():
+                    continue
+                try:
+                    with open("/proc/%s/comm" % entry, encoding="utf-8",
+                              errors="ignore") as fh:
+                        names.add(fh.read().strip().lower())
+                except OSError:
+                    continue
+        else:
+            out = subprocess.run(["ps", "-eo", "comm="],
+                                 capture_output=True, text=True, timeout=15)
+            for line in out.stdout.splitlines():
+                if line.strip():
+                    names.add(line.strip().lower())
+    except Exception:
+        return set()
+    return names
+
+
+def running_agents(targets) -> list:
+    """Return [(label, [matched process names])] for agents that look busy.
+
+    Matching is exact on the process stem (".exe" stripped) so a short name
+    such as "pi" cannot match an unrelated process like "pycharm".
+    """
+    names = _running_process_names()
+    if not names:
+        return []
+    stems = set(n[:-4] if n.endswith(".exe") else n for n in names)
+    hits = []
+    for t in targets:
+        want = set(w.lower() for w in AGENTS.get(t, {}).get("procs") or [])
+        matched = sorted(stems & want)
+        if matched:
+            hits.append((AGENTS[t]["label"], matched))
+    return hits
+
+
 def main():
     global _LANG, _AGE_DAYS
     # Resolve language before building the parser so --help is localized too.
@@ -684,6 +837,8 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help=_t("arg.dryrun"))
     ap.add_argument("--list-targets", action="store_true", help=_t("arg.listtargets"))
     ap.add_argument("--check", type=int, default=0, metavar="N", help=_t("arg.check"))
+    ap.add_argument("--ignore-running", action="store_true",
+                    help=_t("arg.ignorerunning"))
     args = ap.parse_args()
 
     if args.list_targets:
@@ -751,6 +906,27 @@ def main():
     if not candidates:
         print(_t("clean.none"))
         return 0
+
+    # Warn when the target agent is still running: a live process may hold open
+    # handles on files we are about to delete, so the space only comes back once
+    # it exits. Detection is best-effort; a failed probe never blocks a clean.
+    busy = [] if args.ignore_running else running_agents(targets)
+    if busy:
+        # JSON mode must keep stdout parseable, so warnings go to stderr there.
+        _out = sys.stderr if args.json else sys.stdout
+        for label, procs in busy:
+            print(_t("proc.running", label=label, procs=", ".join(procs)), file=_out)
+        print(_t("proc.hint"), file=_out)
+        if not args.yes:
+            print(_t("proc.hint2"), file=_out)
+            print(_t("proc.prompt"), file=_out)
+            try:
+                _r = input("> ").strip().lower()
+            except EOFError:
+                _r = ""
+            if _r not in ("y", "yes"):
+                print(_t("confirm.cancelled"))
+                return 0
 
     confirmed = []
     if args.yes:

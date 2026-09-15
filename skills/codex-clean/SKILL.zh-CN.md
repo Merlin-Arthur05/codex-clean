@@ -1,7 +1,7 @@
 ---
 name: codex-clean
 allowed-tools: Bash, Read
-description: "面向 AI 编程 agent 的运行时缓存/日志清理——只针对 agent 自身产生的可再生数据(~/.codex、~/.claude、~/.pi/agent)，与通用电脑清理(qing-li-dian-nao)完全不同：不清电脑磁盘、不整理文件、不扫项目目录。适用场景：编程 agent 磁盘占用膨胀、日志/临时文件过多、logs_2.sqlite 及 WAL 巨大、SSD 写入量大时使用。触发词：清理Codex缓存、Codex日志太多、Codex占空间、codex cache clean、codex log clean、codex SSD占用、clean up codex、清理Claude缓存、清理Pi缓存。独有能力：①对 Codex 的 SQLite 库执行 VACUUM + WAL checkpoint(TRUNCATE)——这是通用清理工具没有的、针对 Codex 日志库/WAL 膨胀的专用手段；②logs_2.sqlite(仅诊断日志、非会话)超过100MB可备份后重建；③输出支持中英双语随客户端语言切换(--lang/CODEX_CLEAN_LANG)；④纯标准库零依赖；⑤`--age N` 按文件年龄只清超过 N 天的过期临时文件(保留近期文件，避免误删正在使用的缓存)；⑥`--json` 输出含每项的 planned_action 预览，以及清理后“预估释放 vs 实际释放”对比；⑦一个 `--target` 参数即可选择 codex / claude-code / pi / all。安全边界：只删可重建缓存、只真空不删库内数据，绝不触碰会话历史(sessions)、state/记忆/目标库内容、auth.json/config.toml/settings.json、bin/runtimes 可执行文件、已安装的包及用户项目。默认先只读扫描列清单，逐项确认后才执行。"
+description: "面向 AI 编程 agent 的运行时缓存/日志清理——只针对 agent 自身产生的可再生数据(~/.codex、~/.claude、~/.pi/agent)，与通用电脑清理(qing-li-dian-nao)完全不同：不清电脑磁盘、不整理文件、不扫项目目录。适用场景：编程 agent 磁盘占用膨胀、日志/临时文件过多、logs_2.sqlite 及 WAL 巨大、SSD 写入量大时使用。触发词：清理Codex缓存、Codex日志太多、Codex占空间、codex cache clean、codex log clean、codex SSD占用、clean up codex、清理Claude缓存、清理Pi缓存。独有能力：①对 Codex 的 SQLite 库执行 VACUUM + WAL checkpoint(TRUNCATE)——这是通用清理工具没有的、针对 Codex 日志库/WAL 膨胀的专用手段；②logs_2.sqlite(仅诊断日志、非会话)超过100MB可备份后重建；③输出支持中英双语随客户端语言切换(--lang/CODEX_CLEAN_LANG)；④纯标准库零依赖；⑤`--age N` 按文件年龄只清超过 N 天的过期临时文件(保留近期文件，避免误删正在使用的缓存)；⑥`--json` 输出含每项的 planned_action 预览，以及清理后“预估释放 vs 实际释放”对比；⑦一个 `--target` 参数即可选择 codex / claude-code / pi / opencode / all；⑧清理前的进程占用检查会在 agent 仍持有文件句柄时给出提醒。安全边界：只删可重建缓存、只真空不删库内数据，绝不触碰会话历史(sessions)、state/记忆/目标库内容、auth.json/config.toml/settings.json、bin/runtimes 可执行文件、已安装的包及用户项目。默认先只读扫描列清单，逐项确认后才执行。"
 ---
 
 # Agent 缓存与日志清理
@@ -15,6 +15,7 @@ description: "面向 AI 编程 agent 的运行时缓存/日志清理——只针
 | **Codex**(默认) | `~/.codex`(`CODEX_HOME`) | 默认，或 `--target codex` |
 | **Claude Code** | `~/.claude`(`CLAUDE_HOME`) | `--target claude-code` |
 | **Pi** | `~/.pi/agent`(`PI_AGENT_HOME`) | `--target pi` |
+| **opencode** | `~/.local/share/opencode`(`XDG_DATA_HOME`) | `--target opencode` |
 | 以上全部 | — | `--target all` |
 
 Codex 是主力目标、支持最深(SQLite VACUUM、日志库重建)。每个 agent 复用同一套
@@ -83,7 +84,8 @@ python "<skill>\scripts\codex_clean.py" --scan
 - `--clean --yes`：跳过交互，清理全部“纯删除 + WAL”安全项
 - `--clean --yes --vacuum`：额外对数据库执行 VACUUM（推荐完整清理用这个）
 - `--clean --yes --rebuild-logs`：额外允许重建超大日志库（>100MB 时建议，先备份；仅 Codex）
-- `--target codex|claude-code|pi|all`：要清理哪个 agent 的数据（默认 `codex`）
+- `--target codex|claude-code|pi|opencode|all`：要清理哪个 agent 的数据（默认 `codex`）
+- `--ignore-running`：跳过清理前的进程占用检查
 - `--age N`：只处理**修改时间超过 N 天**的临时文件，较新的文件保留（只对删除类生效；`--scan --age 7` 可先预览）
 - `--exclude LIST` / `--only LIST`：按 `项名` 或 `agent:项名` 跳过 / 只保留
 - `--dry-run`：只显示 `--clean` 将要做什么，不做任何改动

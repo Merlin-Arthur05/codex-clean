@@ -1,7 +1,7 @@
 ---
 name: codex-clean
 allowed-tools: Bash, Read
-description: "Runtime cache/log cleaner for AI coding agents — targets ONLY regenerable data produced by the agents themselves (~/.codex, ~/.claude, ~/.pi/agent). Completely different from generic PC cleaners (qing-li-dian-nao): it never scans your disk, organizes files, or touches project directories. Use when: an AI coding agent's disk usage ballooned, its logs/temp files piled up, logs_2.sqlite and its WAL are huge, or it is driving heavy SSD writes. Triggers: 清理Codex缓存, Codex日志太多, Codex占空间, codex cache clean, codex log clean, codex SSD占用, clean up codex, 清理Claude缓存, 清理Pi缓存. Unique capabilities: (1) SQLite VACUUM + WAL checkpoint(TRUNCATE) on Codex databases — a Codex-specific remedy for log-DB/WAL bloat that generic cleaners lack; (2) logs_2.sqlite (diagnostics only, not conversations) can be backed up and rebuilt when over 100MB; (3) bilingual en/zh output that follows the client language (--lang / CODEX_CLEAN_LANG); (4) pure stdlib, zero dependencies; (5) --age N removes only temp files older than N days, preserving recent files so in-use caches are not deleted; (6) --json emits a per-item planned_action preview plus an estimated-vs-actual freed-bytes report; (7) one --target flag selects codex, claude-code, pi, or all. Safety boundary: deletes only rebuildable caches, VACUUMs databases without deleting rows, and never touches conversation history (sessions/), state/memory/goals DB contents, auth.json/config.toml/settings.json, bin/runtimes executables, installed packages, or user projects. Defaults to a read-only scan and confirms each item before cleaning."
+description: "Runtime cache/log cleaner for AI coding agents — targets ONLY regenerable data produced by the agents themselves (~/.codex, ~/.claude, ~/.pi/agent). Completely different from generic PC cleaners (qing-li-dian-nao): it never scans your disk, organizes files, or touches project directories. Use when: an AI coding agent's disk usage ballooned, its logs/temp files piled up, logs_2.sqlite and its WAL are huge, or it is driving heavy SSD writes. Triggers: 清理Codex缓存, Codex日志太多, Codex占空间, codex cache clean, codex log clean, codex SSD占用, clean up codex, 清理Claude缓存, 清理Pi缓存. Unique capabilities: (1) SQLite VACUUM + WAL checkpoint(TRUNCATE) on Codex databases — a Codex-specific remedy for log-DB/WAL bloat that generic cleaners lack; (2) logs_2.sqlite (diagnostics only, not conversations) can be backed up and rebuilt when over 100MB; (3) bilingual en/zh output that follows the client language (--lang / CODEX_CLEAN_LANG); (4) pure stdlib, zero dependencies; (5) --age N removes only temp files older than N days, preserving recent files so in-use caches are not deleted; (6) --json emits a per-item planned_action preview plus an estimated-vs-actual freed-bytes report; (7) one --target flag selects codex, claude-code, pi, opencode, or all; (8) a pre-clean running-process check warns when the agent still holds file handles. Safety boundary: deletes only rebuildable caches, VACUUMs databases without deleting rows, and never touches conversation history (sessions/), state/memory/goals DB contents, auth.json/config.toml/settings.json, bin/runtimes executables, installed packages, or user projects. Defaults to a read-only scan and confirms each item before cleaning."
 ---
 
 # Agent Cache & Log Cleaner
@@ -16,6 +16,7 @@ files that AI coding agents create for themselves:
 | **Codex** (default) | `~/.codex` (`CODEX_HOME`) | default, or `--target codex` |
 | **Claude Code** | `~/.claude` (`CLAUDE_HOME`) | `--target claude-code` |
 | **Pi** | `~/.pi/agent` (`PI_AGENT_HOME`) | `--target pi` |
+| **opencode** | `~/.local/share/opencode` (`XDG_DATA_HOME`) | `--target opencode` |
 | all of the above | — | `--target all` |
 
 Codex is the primary target and has the deepest support (SQLite VACUUM, log-DB
@@ -70,6 +71,9 @@ protected-list safety contract.
 | `pi-tmp` | `~/.pi/agent/tmp` | Pi temp dir (includes `tmp/extensions/<hash>` package checkouts) |
 | `pi-debug-log` | `~/.pi/agent/pi-debug.log` | Pi debug log |
 | `pi-cache`, `pi-logs` | `~/.pi/agent/{cache,logs}` | Best-effort: only if they exist |
+| `opencode-log` | `~/.local/share/opencode/log` | opencode logs |
+| `opencode-cache` | `$XDG_CACHE_HOME/opencode` or `~/.cache/opencode` | separate XDG root |
+| `opencode-tmp` | `<os-tmpdir>/opencode` | separate temp root (`OPENCODE_TMPDIR` overrides) |
 
 **B. Database VACUUM + WAL cleanup (data kept, space reclaimed)**
 Codex: runs `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM` on
@@ -98,7 +102,8 @@ python "<skill>\scripts\codex_clean.py" --scan
 - `--clean --yes` — skip interaction, clean all "delete + WAL" safe items
 - `--clean --yes --vacuum` — additionally VACUUM the databases (recommended full clean)
 - `--clean --yes --rebuild-logs` — additionally allow rebuilding an oversized log DB (>100 MB, backs up first; Codex only)
-- `--target codex|claude-code|pi|all` — which agent's data to clean (default `codex`)
+- `--target codex|claude-code|pi|opencode|all` — which agent's data to clean (default `codex`)
+- `--ignore-running` — skip the pre-clean check for a running agent process
 - `--age N` — only handle temp files **older than N days**, keeping newer ones (delete items only; preview with `--scan --age 7`)
 - `--exclude LIST` / `--only LIST` — skip or keep items by `name` or `agent:name`
 - `--dry-run` — print what `--clean` would do, change nothing

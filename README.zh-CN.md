@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)]()
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![CI](https://github.com/Merlin-Arthur05/codex-clean/actions/workflows/ci.yml/badge.svg)](https://github.com/Merlin-Arthur05/codex-clean/actions/workflows/ci.yml)
 
 **一个"先确认再清理"的安全工具：回收 AI 编程 Agent 自身的缓存、日志和 WAL 文件占用的磁盘空间。支持 OpenAI Codex、Claude Code 与 Pi。绝不碰你的对话记录、配置和项目文件。**
 
@@ -15,6 +16,7 @@
 | **OpenAI Codex**（默认） | `~/.codex`（`CODEX_HOME`） | *（默认）* |
 | **Claude Code** | `~/.claude`（`CLAUDE_HOME`） | `--target claude-code` |
 | **Pi** | `~/.pi/agent`（`PI_AGENT_HOME`） | `--target pi` |
+| **opencode** | `~/.local/share/opencode`（`XDG_DATA_HOME`） | `--target opencode` |
 | *以上全部* | — | `--target all` |
 
 每个 Agent 的家目录都在运行时由其环境变量解析，缺失时回落到默认路径——没有任何一处硬编码到某台机器。
@@ -32,7 +34,7 @@
 | **OpenAI Codex** | 已支持 | `~/.codex` 临时文件、插件缓存、日志、WAL、状态库空洞 |
 | **Claude Code** | 已支持 | `~/.claude` 缓存、调试日志、shell-snapshots、statsig |
 | **Pi** | 已支持 | `~/.pi/agent` 缓存、临时文件、日志、调试日志 |
-| **opencode** | 规划中 - v1.5.0（[#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)） | XDG 数据 / 日志 / 缓存 + WAL 模式的 `opencode.db` |
+| **opencode** | 已支持 | `log/`、`cache/`、`tmp/`，以及 `opencode.db` 的 WAL |
 
 ## 与"通用电脑清理"工具的区别
 
@@ -66,6 +68,7 @@ AI 编程 Agent 的家目录里会不断堆积可再生数据。以 Codex（CLI 
 | **Codex** | `.tmp/`、`tmp/`、`plugins/cache/` | 6 个已知 SQLite 库 | 支持，`logs_2.sqlite` > 100 MB 时 |
 | **Claude Code** | `cache/`、`debug/`、`shell-snapshots/`、`statsig/` | 自动发现 | 不适用 |
 | **Pi** | `cache/`、`tmp/`、`logs/`、`pi-debug.log` | 自动发现 | 不适用 |
+| **opencode** | `log/`、`cache/`、`tmp/` | `opencode.db`（WAL） | 不适用 |
 
 - **VACUUM** 执行 `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM`：保留数据，只回收空间。
 - **自动发现**指扫描时用通配符在 Agent 家目录下查找 `*.sqlite` / `*.sqlite3` / `*.db`，而不是依赖硬编码清单。若某 Agent 没有数据库，该参数会提示"不适用"而非报错。
@@ -78,6 +81,7 @@ AI 编程 Agent 的家目录里会不断堆积可再生数据。以 Codex（CLI 
 - **Codex** —— `bin/`、`runtimes/`、`sessions/`、`config.toml`、`auth.json`、`skills/`、`rules/`、`model-catalogs/`、`backups/`
 - **Claude Code** —— `projects/`（你的对话）、`memory/`、`plugins/`、`skills/`、`settings.json`、`config.json`、`sessions/`、`ide/`、`history.jsonl`
 - **Pi** —— `sessions/`（对话）、`skills/`、`npm/`（**用户已安装的包**）、`git/`、`bin/`、`tools/`、`prompts/`、`themes/`、`settings.json`、`trust.json`、`auth.json`、`models.json`、`AGENTS.md`、`SYSTEM.md`
+- **opencode** —— `repos/`（用户克隆的仓库）、`config/`、`state/`（锁文件）、`auth.json`
 - **所有 Agent** —— 状态库**内部的数据**（只 VACUUM，绝不删除），以及你的项目文件与工作目录
 
 ### 已知限制
@@ -86,6 +90,7 @@ AI 编程 Agent 的家目录里会不断堆积可再生数据。以 Codex（CLI 
 
 - **`--rebuild-logs`（Claude Code、Pi）** —— 不适用。两者都没有"超大诊断日志库"这一概念；它们的日志是普通文件（Claude 为 `debug/`，Pi 为 `logs/` 与 `pi-debug.log`），已在删除白名单中。该参数会打印"不适用"提示，而不是报错。
 - **`--vacuum`（Claude Code、Pi）** —— **并非**被硬编码为不支持。两者都不声明固定的库清单，而是由扫描时自动发现（见上）。当前核实：`~/.claude` 下为 0 个此类文件，因此参数提示"不适用"；若将来版本引入数据库，VACUUM 会**自动生效，无需改代码**。
+- **opencode 的路径在 Windows 上出人意料**。opencode 用 `xdg-basedir@5.1.0` 解析目录，而该版本**没有** macOS/Windows 回落，因此 XDG 根在**所有平台**上都被原样使用：数据目录是 `~/.local/share/opencode`，而**不是** `%LOCALAPPDATA%`。它的缓存与临时目录又分属另外的根（`XDG_CACHE_HOME` 与系统临时目录），这正是注册表需要为该 Agent 支持多根的原因。
 - **Pi 的可清理项是"尽力而为"**。Pi 源码只记载了 `~/.pi/agent` 下的用户数据（`sessions/`、`skills/`、`npm/` 为用户安装包、`extensions/` 以及配置文件）。`cache/` / `tmp/` / `logs/` 因其普遍可再生而纳入，且**仅当实际存在时**才会处理；保护清单确保用户数据绝不会被碰。
 
 ## 安装
@@ -142,7 +147,13 @@ python scripts/codex_clean.py --clean --dry-run --target codex
 # 13. 查看支持的 Agent 及其能力
 python scripts/codex_clean.py --list-targets
 
-# 14. 自动化：可回收达到 500 MB 时以退出码 3 返回
+# 14. 清理 opencode
+python scripts/codex_clean.py --scan --target opencode
+
+# 15. 跳过进程占用检查（无人值守任务用）
+python scripts/codex_clean.py --clean --yes --ignore-running
+
+# 16. 自动化：可回收达到 500 MB 时以退出码 3 返回
 python scripts/codex_clean.py --scan --check 500
 ```
 
@@ -198,6 +209,10 @@ VACUUM 的 `actual_bytes` 是**实测收缩量**（`VACUUM` 前后主库 + WAL +
 
 因此在中文客户端里直接 `CODEX_CLEAN_LANG=zh` 或 `--lang zh` 即可；英文环境默认英文。
 `--json` 输出保留稳定的 `name`/`kind` 键供机器解析，仅 `desc`/`action` 字段随语言本地化。
+
+### 进程占用检查
+
+清理前，工具会检查所选 Agent 是否仍在运行。运行中的进程可能仍持有被删文件的句柄，磁盘空间要等它退出后才真正释放。命中时仅打印告警——`--json` 模式下输出到 stderr，以保证 stdout 可被解析。交互模式会请你确认；`--yes` 则只告警并继续，因此无人值守任务永不被阻塞。用 `--ignore-running` 可完全跳过该检查。检测为尽力而为且仅用标准库（Windows 用 `tasklist`，Linux 读 `/proc`，macOS 用 `ps`）：若检测失败则不上报任何结果，清理照常进行。
 
 > **最佳实践**：执行 `--clean` 前**完全退出目标 Agent**，避免进程仍持有被删文件的句柄——否则磁盘空间要等进程退出后才真正释放。
 
@@ -276,7 +291,7 @@ pi install git:github.com/Merlin-Arthur05/codex-clean
 ## 测试
 
 ```bash
-python tests/test_codex_clean.py          # 68 项回归检查，仅用标准库
+python tests/test_codex_clean.py          # 80 项回归检查，仅用标准库
 node   tests/test_pi_extension.mjs        # Pi 扩展加载测试（未装 Pi 时自动跳过）
 ```
 

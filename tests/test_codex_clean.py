@@ -10,6 +10,7 @@ CLAUDE_HOME / PI_AGENT_HOME at a throwaway temp directory.
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 import shutil
@@ -271,7 +272,7 @@ def main() -> int:
     # ---------------- F4: --list-targets ----------------
     tgt = json.loads(run(["--list-targets", "--json"]).stdout)
     check("T39 --list-targets JSON lists every agent",
-          {t["name"] for t in tgt} == {"codex", "claude-code", "pi"},
+          {t["name"] for t in tgt} == {"codex", "claude-code", "pi", "opencode"},
           str(sorted(t["name"] for t in tgt)))
     r = run(["--list-targets", "--lang", "en"])
     check("T40 --list-targets text mode prints agents + capabilities",
@@ -281,14 +282,16 @@ def main() -> int:
     cx2 = mkhome("all_cx_", [(".tmp/a.bin", 10000)])
     cc3 = mkhome("all_cc_", [("cache/c.bin", 20000)])
     pi3 = mkhome("all_pi_", [("cache/p.bin", 30000)])
-    allenv = {"CODEX_HOME": cx2, "CLAUDE_HOME": cc3, "PI_AGENT_HOME": pi3}
+    oc3 = mkhome("all_oc_", [("opencode/log/l.bin", 40000)])
+    allenv = {"CODEX_HOME": cx2, "CLAUDE_HOME": cc3, "PI_AGENT_HOME": pi3,
+              "XDG_DATA_HOME": oc3}
     ritems = json.loads(run(["--scan", "--json", "--target", "all"], allenv).stdout)
     ags = {i["agent"] for i in ritems}
     check("T41 --target all covers every agent",
-          ags == {"codex", "claude-code", "pi"}, str(sorted(ags)))
+          ags == {"codex", "claude-code", "pi", "opencode"}, str(sorted(ags)))
     r = run(["--scan", "--target", "all", "--lang", "en"], allenv)
     check("T42 --target all prints one section per agent",
-          r.stdout.count("directory:") >= 3, r.stdout[:120])
+          r.stdout.count("directory:") >= 4, r.stdout[:120])
     r = run(["--clean", "--yes", "--target", "all", "--json"], allenv)
     check("T43 --target all clean runs without crashing", r.returncode == 0,
           r.stderr[:150])
@@ -296,7 +299,8 @@ def main() -> int:
         rep_all = json.loads(r.stdout)
         check("T44 --target all report unions protected lists",
               "sessions" in rep_all.get("protected_untouched", [])
-              and "npm" in rep_all.get("protected_untouched", []))
+              and "npm" in rep_all.get("protected_untouched", [])
+              and "repos" in rep_all.get("protected_untouched", []))
     else:
         check("T44 --target all report unions protected lists", False)
 
@@ -343,6 +347,86 @@ def main() -> int:
     r = run(["--scan", "--check", "1", "--json"], {"CODEX_HOME": chk})
     check("T56 --check still emits JSON and exits 3",
           r.returncode == 3 and r.stdout.strip().startswith("["))
+
+    # ---------------- F5: opencode (multi-root agent) ----------------
+    oc_data = mkhome("oc_data_", [("opencode/log/l.bin", 40000),
+                                  ("opencode/repos/r.txt", 90000)])
+    oc_cache = mkhome("oc_cache_", [("opencode/bin/b.bin", 70000)])
+    oc_tmp = mkhome("oc_tmp_", [("opencode/t.bin", 30000)])
+    ocenv = {"XDG_DATA_HOME": oc_data, "XDG_CACHE_HOME": oc_cache,
+             "OPENCODE_TMPDIR": oc_tmp}
+    oitems = json.loads(run(["--scan", "--json", "--target", "opencode"], ocenv).stdout)
+    _n = lambda p: p.replace("\\", "/")
+    opaths = {i["name"]: _n(i["path"]) for i in oitems}
+    check("T69 opencode data home = XDG_DATA_HOME + home_sub",
+          opaths.get("opencode-log") == _n(oc_data) + "/opencode/log",
+          str(opaths.get("opencode-log")))
+    check("T70 opencode cache lives under the separate XDG_CACHE_HOME root",
+          opaths.get("opencode-cache") == _n(oc_cache) + "/opencode",
+          str(opaths.get("opencode-cache")))
+    check("T71 opencode tmp lives under the OS temp root, outside the data home",
+          opaths.get("opencode-tmp") == _n(oc_tmp) + "/opencode",
+          str(opaths.get("opencode-tmp")))
+    check("T72 opencode whitelist covers log/cache/tmp",
+          {"opencode-log", "opencode-cache", "opencode-tmp"} <= set(opaths),
+          str(sorted(opaths)))
+    check("T73 opencode never offers user repos for deletion",
+          not any("repos" in p for p in opaths.values()), str(sorted(opaths.values())))
+    check("T74 opencode is a first-class target for --target all",
+          "opencode" in {t["name"] for t in
+                         json.loads(run(["--list-targets", "--json"]).stdout)})
+
+    # ---------------- F6: running-process detection ----------------
+    sys.path.insert(0, str(SCRIPT.parent))
+    try:
+        import codex_clean as _cc
+    except Exception:
+        _cc = None
+    if _cc is not None:
+        _cc._running_process_names = lambda: {"codex.exe", "pycharm", "opencode"}
+        hits = dict(_cc.running_agents(["codex", "claude-code", "pi", "opencode"]))
+        check("T75 detects running agents by exact process stem",
+              "Codex" in hits and "opencode" in hits, str(hits))
+        check("T76 a short name like 'pi' does not match 'pycharm'",
+              "Pi" not in hits, str(hits))
+        check("T77 absent agents are not reported",
+              "Claude Code" not in hits, str(hits))
+        _cc._running_process_names = lambda: set()
+        check("T78 an unavailable probe reports nothing (never blocks a clean)",
+              _cc.running_agents(["codex", "opencode"]) == [], "non-empty")
+
+        # The warning must never pollute JSON stdout -- it breaks json.loads in
+        # automation. Drive main() in-process with a faked process list.
+        _cc._running_process_names = lambda: {"codex.exe"}
+        cxj = mkhome("json_pure_", [(".tmp/a.bin", 12000)])
+        _old_home, _old_argv, _old_out, _old_err = (
+            os.environ.get("CODEX_HOME"), sys.argv, sys.stdout, sys.stderr)
+        _bo, _be = io.StringIO(), io.StringIO()
+        try:
+            os.environ["CODEX_HOME"] = cxj
+            sys.argv = ["codex_clean.py", "--clean", "--yes", "--json", "--lang", "en"]
+            sys.stdout, sys.stderr = _bo, _be
+            try:
+                _cc.main()
+            except SystemExit:
+                pass
+        finally:
+            sys.stdout, sys.stderr, sys.argv = _old_out, _old_err, _old_argv
+            if _old_home is None:
+                os.environ.pop("CODEX_HOME", None)
+            else:
+                os.environ["CODEX_HOME"] = _old_home
+        try:
+            json.loads(_bo.getvalue())
+            _pure = True
+        except Exception:
+            _pure = False
+        check("T79 JSON stdout stays parseable while the agent is running",
+              _pure, _bo.getvalue()[:120])
+        check("T80 the running warning is routed to stderr, not stdout",
+              "running" in _be.getvalue().lower(), _be.getvalue()[:120])
+    else:
+        check("T75 import codex_clean for process-detection tests", False)
 
     for d in _tmpdirs:
         shutil.rmtree(d, ignore_errors=True)
