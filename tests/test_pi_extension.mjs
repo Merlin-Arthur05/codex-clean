@@ -121,7 +121,7 @@ try {
   /* leave empty */
 }
 check("list-targets reports every agent",
-  rows.map((x) => x.name).sort().join(",") === "claude-code,codex,pi",
+  rows.map((x) => x.name).sort().join(",") === "claude-code,codex,opencode,pi",
   rows.map((x) => x.name).join(","));
 check("pi protected list includes user-installed packages",
   (rows.find((x) => x.name === "pi")?.protected ?? []).includes("npm"));
