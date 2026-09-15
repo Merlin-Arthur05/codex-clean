@@ -263,10 +263,13 @@ pi install git:github.com/Merlin-Arthur05/codex-clean
 ## 路线图
 
 - WAL 增长看护（定期扫描提醒）。
-- 可选的 Windows 计划任务自集成（严格 opt-in）。
-- **opencode**（[anomalyco/opencode](https://github.com/anomalyco/opencode)）——其 XDG 数据/日志/缓存目录，以及 WAL 模式的 `opencode.db`。见 [#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12)。
+- 可选的 Windows 计划任务自集成（严格 opt-in）—— [#7](https://github.com/Merlin-Arthur05/codex-clean/issues/7)。
 - Claude Code `projects/` 对话 JSONL 的 **opt-in** 按年龄清理（显式开关 + 逐项确认，绝不默认开启）。
-- 运行时进程检测：目标 Agent 仍在运行时给出提醒（[#8](https://github.com/Merlin-Arthur05/codex-clean/issues/8)）。
+- 删除失败必须如实上报，不得报成功 —— [#15](https://github.com/Merlin-Arthur05/codex-clean/issues/15)。
+- 明确的符号链接策略 —— [#16](https://github.com/Merlin-Arthur05/codex-clean/issues/16)。
+- 配置文件支持（JSON / INI）—— [#17](https://github.com/Merlin-Arthur05/codex-clean/issues/17)。
+- 更多 Agent（Gemini CLI 等）—— [#18](https://github.com/Merlin-Arthur05/codex-clean/issues/18)。
+- 支持通过 pipx / pip 安装 —— [#20](https://github.com/Merlin-Arthur05/codex-clean/issues/20)。
 
 以上均跟踪于 [项目看板](https://github.com/users/Merlin-Arthur05/projects/3)。
 

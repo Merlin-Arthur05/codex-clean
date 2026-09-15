@@ -271,11 +271,13 @@ The extension is a thin wrapper that shells out to the same Python script, so it
 ## Roadmap / Ideas
 
 - Automatic WAL-growth watchdog suggestion (periodic scan reminder).
-- Optional integration as a Windows scheduled task (opt-in only).
-- **opencode** ([anomalyco/opencode](https://github.com/anomalyco/opencode)) — its XDG
-  data/log/cache directories plus the WAL-mode `opencode.db`. Tracked in [#12](https://github.com/Merlin-Arthur05/codex-clean/issues/12).
+- Optional Windows scheduled-task integration (opt-in only) — [#7](https://github.com/Merlin-Arthur05/codex-clean/issues/7).
 - Opt-in age-based cleaning for Claude Code's `projects/` conversation JSONL (explicit flag + per-item confirmation, never on by default).
-- Runtime process detection, so a clean warns when the target agent is still running ([#8](https://github.com/Merlin-Arthur05/codex-clean/issues/8)).
+- Report delete failures instead of silently succeeding — [#15](https://github.com/Merlin-Arthur05/codex-clean/issues/15).
+- Explicit symlink policy — [#16](https://github.com/Merlin-Arthur05/codex-clean/issues/16).
+- Config file support (JSON/INI) — [#17](https://github.com/Merlin-Arthur05/codex-clean/issues/17).
+- More agents (Gemini CLI, ...) — [#18](https://github.com/Merlin-Arthur05/codex-clean/issues/18).
+- Make it installable via pipx/pip — [#20](https://github.com/Merlin-Arthur05/codex-clean/issues/20).
 
 All tracked on the [project board](https://github.com/users/Merlin-Arthur05/projects/3).
 
