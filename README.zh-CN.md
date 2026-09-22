@@ -153,7 +153,10 @@ python scripts/codex_clean.py --scan --target opencode
 # 15. 跳过进程占用检查（无人值守任务用）
 python scripts/codex_clean.py --clean --yes --ignore-running
 
-# 16. 自动化：可回收达到 500 MB 时以退出码 3 返回
+# 16. 打印版本号
+python scripts/codex_clean.py --version
+
+# 17. 自动化：可回收达到 500 MB 时以退出码 3 返回
 python scripts/codex_clean.py --scan --check 500
 ```
 
@@ -213,6 +216,21 @@ VACUUM 的 `actual_bytes` 是**实测收缩量**（`VACUUM` 前后主库 + WAL +
 ### 进程占用检查
 
 清理前，工具会检查所选 Agent 是否仍在运行。运行中的进程可能仍持有被删文件的句柄，磁盘空间要等它退出后才真正释放。命中时仅打印告警——`--json` 模式下输出到 stderr，以保证 stdout 可被解析。交互模式会请你确认；`--yes` 则只告警并继续，因此无人值守任务永不被阻塞。用 `--ignore-running` 可完全跳过该检查。检测为尽力而为且仅用标准库（Windows 用 `tasklist`，Linux 读 `/proc`，macOS 用 `ps`）：若检测失败则不上报任何结果，清理照常进行。
+
+### 符号链接与如实上报
+
+把这个工具指向一个目录时，有两条保证值得了解：
+
+- **绝不跟随符号链接。** 软链按链接本身计量，且在统计时被跳过，因此绝不会用"家目录之外的
+  目标大小"来虚报可回收空间。删除一棵目录树时，删除的是链接本身，而不是它指向的数据。
+- **报告是实测而非估算。** `actual_bytes` 是删除前后的真实体积差。若有内容无法删除
+  （典型情况是 Agent 仍在运行、持有文件句柄），该项会被标记为 `failed`，
+  未删掉的部分**不会**计入已释放空间，进程以退出码 **4** 而非 `0` 结束，便于计划任务判断。
+
+### 性能
+
+目录遍历使用 `os.scandir` 而非 `os.walk`，直接复用操作系统读取目录时已返回的条目信息，
+省去每个文件一次独立 `stat` —— 在 Windows 上对一棵 12000 文件的缓存树实测**快约 30 倍**。
 
 > **最佳实践**：执行 `--clean` 前**完全退出目标 Agent**，避免进程仍持有被删文件的句柄——否则磁盘空间要等进程退出后才真正释放。
 
@@ -289,12 +307,13 @@ pi install git:github.com/Merlin-Arthur05/codex-clean
 - 过滤只能**收窄**白名单。受保护项从来不在扫描结果里，因此任何模式都无法把它"放回"。
 - `--dry-run` 复用 `--json` 扫描输出中已有的 `planned_action` 数据，
   所以预演与真实执行描述的是同一批动作。
-- 退出码：`0` 正常，`2` 参数错误，`3` 可回收量达到 `--check` 阈值。
+- 退出码：`0` 正常，`2` 参数错误，`3` 可回收量达到 `--check` 阈值，
+  `4` 清理未完全成功（有路径未能删除）。
 
 ## 测试
 
 ```bash
-python tests/test_codex_clean.py          # 80 项回归检查，仅用标准库
+python tests/test_codex_clean.py          # 90 项回归检查，仅用标准库
 node   tests/test_pi_extension.mjs        # Pi 扩展加载测试（未装 Pi 时自动跳过）
 ```
 

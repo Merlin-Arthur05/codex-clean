@@ -37,6 +37,13 @@ protected-list safety contract.
 > If the user wants their computer or disk cleaned, hand off to a generic
 > cleaner instead of using this skill.
 
+## Guarantees
+
+- Directory walks use `os.scandir` (no per-file `stat`), so scans stay fast on large caches.
+- Symlinks are never followed: skipped while sizing, unlinked as links when deleting.
+- `actual_bytes` is measured (size before minus after), so the report never overstates what was
+  reclaimed. A path that survived is reported as `failed` and makes the process exit **4**.
+
 ## Core contract
 
 - **Only the named agents.** Never cleans the user's personal files or other tools.
@@ -104,6 +111,7 @@ python "<skill>\scripts\codex_clean.py" --scan
 - `--clean --yes --rebuild-logs` — additionally allow rebuilding an oversized log DB (>100 MB, backs up first; Codex only)
 - `--target codex|claude-code|pi|opencode|all` — which agent's data to clean (default `codex`)
 - `--ignore-running` — skip the pre-clean check for a running agent process
+- `--version` — print `codex-clean <version>` and exit
 - `--age N` — only handle temp files **older than N days**, keeping newer ones (delete items only; preview with `--scan --age 7`)
 - `--exclude LIST` / `--only LIST` — skip or keep items by `name` or `agent:name`
 - `--dry-run` — print what `--clean` would do, change nothing

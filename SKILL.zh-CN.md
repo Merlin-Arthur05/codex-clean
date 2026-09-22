@@ -33,6 +33,13 @@ Codex 是主力目标、支持最深(SQLite VACUUM、日志库重建)。每个 a
 
 > 一句话：**codex-clean 是编程 agent 的“自体清洁”，不是电脑管家**。若用户要求清理电脑/磁盘，应交给通用清理技能而非本技能。
 
+## 若干保证
+
+- 目录遍历使用 `os.scandir`（不逐文件 `stat`），大缓存下扫描依然快速。
+- 绝不跟随符号链接：统计时跳过，删除时只删链接本身。
+- `actual_bytes` 为实测值（删除前后体积差），报告不会虚报回收量。
+  未能删除的路径会被标记为 `failed`，并使进程以退出码 **4** 结束。
+
 ## 核心契约
 
 - **只针对指定 agent 自己**，不清理用户的电脑文件、不清理其他工具。
@@ -86,6 +93,7 @@ python "<skill>\scripts\codex_clean.py" --scan
 - `--clean --yes --rebuild-logs`：额外允许重建超大日志库（>100MB 时建议，先备份；仅 Codex）
 - `--target codex|claude-code|pi|opencode|all`：要清理哪个 agent 的数据（默认 `codex`）
 - `--ignore-running`：跳过清理前的进程占用检查
+- `--version`：打印 `codex-clean <版本号>` 后退出
 - `--age N`：只处理**修改时间超过 N 天**的临时文件，较新的文件保留（只对删除类生效；`--scan --age 7` 可先预览）
 - `--exclude LIST` / `--only LIST`：按 `项名` 或 `agent:项名` 跳过 / 只保留
 - `--dry-run`：只显示 `--clean` 将要做什么，不做任何改动

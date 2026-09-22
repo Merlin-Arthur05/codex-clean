@@ -428,6 +428,96 @@ def main() -> int:
     else:
         check("T75 import codex_clean for process-detection tests", False)
 
+    # ---------------- F7: fast walk, symlink policy, honest failures ----------------
+    v = run(["--version"])
+    check("T81 --version prints the script version",
+          v.stdout.strip() == "codex-clean " + _script_version(), v.stdout.strip())
+
+    if _cc is not None:
+        _real_unlink = os.unlink
+        _boom = lambda *a, **k: (_ for _ in ()).throw(OSError("locked"))
+
+        # A failing unlink must be reported, never swallowed. Regression: the old
+        # shutil.rmtree(ignore_errors=True) returned success and the full estimate
+        # even when nothing at all was deleted.
+        d1 = Path(tempfile.mkdtemp(prefix="v18_fail_"))
+        _tmpdirs.append(str(d1))
+        (d1 / "a.bin").write_bytes(b"x" * 2048)
+        os.unlink = _boom
+        try:
+            ok1, msg1, got1 = _cc.delete_item(d1)
+        finally:
+            os.unlink = _real_unlink
+        check("T82 a failed delete reports failure", ok1 is False, msg1)
+        check("T83 a failed delete reports 0 bytes freed", got1 == 0, str(got1))
+        check("T84 the offending path is named", "a.bin" in msg1, msg1)
+        check("T85 nothing was actually lost", d1.exists(), str(d1))
+
+        # A successful delete reports what really went away (measured, not assumed).
+        d2 = Path(tempfile.mkdtemp(prefix="v18_ok_"))
+        _tmpdirs.append(str(d2))
+        (d2 / "b.bin").write_bytes(b"y" * 4096)
+        ok2, _msg2, got2 = _cc.delete_item(d2)
+        check("T86 a successful delete measures freed bytes",
+              ok2 is True and got2 == 4096, "ok=%s freed=%s" % (ok2, got2))
+
+        # main() must surface a partial clean as exit code 4 for automation.
+        d3 = Path(tempfile.mkdtemp(prefix="v18_exit_"))
+        _tmpdirs.append(str(d3))
+        (d3 / ".tmp").mkdir()
+        (d3 / ".tmp" / "held.bin").write_bytes(b"z" * 1024)
+        _oh, _oa, _oo, _oe = (os.environ.get("CODEX_HOME"), sys.argv,
+                              sys.stdout, sys.stderr)
+        # Separate buffers: the running-process warning goes to stderr, and
+        # sharing one buffer would mix it into the JSON we want to parse.
+        _bo, _be3 = io.StringIO(), io.StringIO()
+        os.unlink = _boom
+        try:
+            os.environ["CODEX_HOME"] = str(d3)
+            sys.argv = ["codex_clean.py", "--clean", "--yes", "--json", "--lang", "en"]
+            sys.stdout, sys.stderr = _bo, _be3
+            try:
+                code3 = _cc.main()
+            except SystemExit as e:
+                code3 = e.code
+        finally:
+            os.unlink = _real_unlink
+            sys.stdout, sys.stderr, sys.argv = _oo, _oe, _oa
+            if _oh is None:
+                os.environ.pop("CODEX_HOME", None)
+            else:
+                os.environ["CODEX_HOME"] = _oh
+        check("T87 a partial clean exits 4", code3 == 4, str(code3))
+        try:
+            _rep3 = json.loads(_bo.getvalue())
+        except Exception:
+            _rep3 = {}
+        check("T88 the JSON report marks the clean as not ok",
+              _rep3.get("ok") is False and _rep3.get("failed_items") == 1, str(_rep3.get("ok")))
+
+        # Symlinks: never counted at target size, never followed on delete.
+        outd = Path(tempfile.mkdtemp(prefix="v18_out_"))
+        _tmpdirs.append(str(outd))
+        (outd / "big.bin").write_bytes(b"B" * 40000)
+        lh = Path(tempfile.mkdtemp(prefix="v18_link_"))
+        _tmpdirs.append(str(lh))
+        (lh / "real.bin").write_bytes(b"r" * 1000)
+        try:
+            os.symlink(str(outd), str(lh / "dirlink"))
+            os.symlink(str(outd / "big.bin"), str(lh / "filelink"))
+            _links = True
+        except (OSError, NotImplementedError, AttributeError):
+            _links = False
+        if _links:
+            check("T89 a symlink target's size is not counted",
+                  _cc._size_of(lh) == 1000, str(_cc._size_of(lh)))
+            _fails = []
+            _cc._remove_path(lh, _fails)
+            check("T90 deleting a tree never follows symlinks",
+                  (outd / "big.bin").exists() and not lh.exists(), str(_fails))
+        else:
+            print("  SKIP  T89/T90  symlinks unavailable (needs developer mode on Windows)")
+
     for d in _tmpdirs:
         shutil.rmtree(d, ignore_errors=True)
 

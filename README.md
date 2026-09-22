@@ -156,7 +156,10 @@ python scripts/codex_clean.py --scan --target opencode
 # 15. Skip the running-process check (for unattended jobs)
 python scripts/codex_clean.py --clean --yes --ignore-running
 
-# 16. Automation: exit 3 when reclaimable space reaches 500 MB
+# 16. Print the version
+python scripts/codex_clean.py --version
+
+# 17. Automation: exit 3 when reclaimable space reaches 500 MB
 python scripts/codex_clean.py --scan --check 500
 ```
 
@@ -221,6 +224,24 @@ the `--help` screen) is localized. Resolution order: `--lang` argument → `CODE
 ### Running-process check
 
 Before cleaning, the tool checks whether the selected agent is still running. A live process may hold open handles on deleted files, so the space only comes back once it exits. On a hit it prints a warning — to stderr in `--json` mode, so stdout stays parseable. Interactively it asks for confirmation; with `--yes` it warns and continues, so unattended jobs are never blocked. Use `--ignore-running` to skip the check. Detection is best-effort and stdlib-only (`tasklist` on Windows, `/proc` on Linux, `ps` on macOS): if it fails, nothing is reported and cleaning proceeds.
+
+### Symlinks and truthful reporting
+
+Two guarantees that matter when you point this at a directory:
+
+- **Symlinks are never followed.** A link is measured as the link itself and skipped while
+  sizing, so it can never inflate the reclaimable figure with the size of a target living
+  outside the agent's home. Deleting a tree unlinks the link — never the data behind it.
+- **The report is measured, not assumed.** `actual_bytes` is the real size difference before
+  and after the removal. If something could not be deleted (typically a running agent holding
+  an open handle), the item is marked `failed`, the shortfall is *not* counted as freed, and
+  the process exits **4** instead of `0`, so scheduled jobs can tell.
+
+### Performance
+
+Directory walks use `os.scandir` rather than `os.walk`, reusing the directory-entry data the OS
+already returned instead of issuing a separate `stat` per file — measured **~30x faster** on a
+12,000-file cache tree on Windows.
 
 > **Best practice:** fully quit the target agent before `--clean`, so no process holds an open handle on deleted files — otherwise disk space isn't reclaimed until the process exits.
 
@@ -298,12 +319,13 @@ Notes:
   scanned items, so no pattern can bring one back.
 - `--dry-run` reuses the `planned_action` data already present in `--json` scan output,
   so the preview and the real run describe the same actions.
-- Exit codes: `0` ok, `2` bad arguments, `3` reclaimable reached the `--check` threshold.
+- Exit codes: `0` ok, `2` bad arguments, `3` reclaimable reached the `--check` threshold,
+  `4` the cleanup did not fully succeed (some paths survived).
 
 ## Tests
 
 ```bash
-python tests/test_codex_clean.py          # 80 regression checks, standard library only
+python tests/test_codex_clean.py          # 90 regression checks, standard library only
 node   tests/test_pi_extension.mjs        # Pi extension load test (skips if Pi absent)
 ```
 

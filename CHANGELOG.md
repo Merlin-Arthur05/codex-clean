@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-22
+
+### Added
+- **`--version` (#19)**: prints `codex-clean <version>` and exits 0.
+
+### Changed
+- **Directory walks are ~30x faster.** `_size_of`, `_age_stats`, the age-filtered delete and the
+  new removal routine all use `os.scandir` instead of `os.walk` + `Path.stat`, reusing the
+  directory-entry data the OS already returned instead of issuing a separate `stat` per file.
+  Measured 0.373s -> 0.012s on a 12,000-file tree on Windows.
+
+### Fixed
+- **A clean no longer reports success when it failed (#15).** `delete_item` used
+  `shutil.rmtree(ignore_errors=True)` and then returned success unconditionally, so a deletion
+  that removed nothing was reported as `ok`, with the full estimate as `actual_bytes`, and exit
+  code 0. It now measures the size before and after, names any path that survived, and exits
+  **4** when a clean was incomplete. Reproduced with a file held open by another process -- the
+  exact "agent still running" case that #8 warns about -- which previously reported
+  "freed 4096 bytes" while deleting nothing at all.
+- **One undeletable file no longer aborts the whole tree.** Read-only files are made writable
+  and retried once, which is what Windows agents tend to leave behind.
+
+### Security
+- **Explicit symlink policy (#16).** Symlinks are skipped while sizing (a link can no longer
+  inflate the reclaimable figure with a target's size) and unlinked as links when deleting,
+  never traversed. Previously this was correct only by accident: `shutil.rmtree` refused to
+  recurse into a linked directory and `ignore_errors=True` silently swallowed the error.
+
+### Compatibility
+Backward compatible with v1.7.0. `--clean` gains exit code `4` alongside the existing `0`/`2`/`3`;
+JSON reports gain `failed_items`, and `ok` now reflects the real outcome. Verified on Python
+3.8-3.13 across Ubuntu, macOS and Windows.
+
 ## [1.7.0] - 2026-09-15
 
 ### Added
