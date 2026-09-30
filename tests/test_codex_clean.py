@@ -25,11 +25,36 @@ results: list[tuple[str, bool]] = []
 _tmpdirs: list[str] = []
 
 
+_FALLBACK_HOME = None
+
+
+def _fallback_home():
+    """Throwaway dir used for any agent home a test forgot to set.
+
+    Without this, a forgotten `--target` falls back to the default agent and a
+    forgotten env var falls back to the *real* ~/.codex -- which is exactly how
+    one of these tests once began cleaning the developer's own machine. The
+    sandbox's delete guard stopped it, but the suite should not depend on that.
+    """
+    global _FALLBACK_HOME
+    if _FALLBACK_HOME is None:
+        _FALLBACK_HOME = tempfile.mkdtemp(prefix="cc_fallback_")
+        _tmpdirs.append(_FALLBACK_HOME)
+    return _FALLBACK_HOME
+
+
 def run(args, home=None):
     env = dict(os.environ)
     env["PYTHONIOENCODING"] = "utf-8"
     if home:
         env.update(home)
+    # Safety net: every agent home points at a throwaway dir unless the test
+    # named one, so no invocation can ever touch a real agent home.
+    _fb = _fallback_home()
+    for _var in ("CODEX_HOME", "CLAUDE_HOME", "PI_AGENT_HOME",
+                 "XDG_DATA_HOME", "GEMINI_CLI_HOME"):
+        if not env.get(_var):
+            env[_var] = _fb
     return subprocess.run([PY, str(SCRIPT), *args], capture_output=True,
                           text=True, encoding="utf-8", env=env)
 
@@ -272,7 +297,7 @@ def main() -> int:
     # ---------------- F4: --list-targets ----------------
     tgt = json.loads(run(["--list-targets", "--json"]).stdout)
     check("T39 --list-targets JSON lists every agent",
-          {t["name"] for t in tgt} == {"codex", "claude-code", "pi", "opencode"},
+          {t["name"] for t in tgt} == {"codex", "claude-code", "pi", "opencode", "gemini"},
           str(sorted(t["name"] for t in tgt)))
     r = run(["--list-targets", "--lang", "en"])
     check("T40 --list-targets text mode prints agents + capabilities",
@@ -283,15 +308,16 @@ def main() -> int:
     cc3 = mkhome("all_cc_", [("cache/c.bin", 20000)])
     pi3 = mkhome("all_pi_", [("cache/p.bin", 30000)])
     oc3 = mkhome("all_oc_", [("opencode/log/l.bin", 40000)])
+    gm3 = mkhome("all_gm_", [(".gemini/tmp/g.bin", 50000)])
     allenv = {"CODEX_HOME": cx2, "CLAUDE_HOME": cc3, "PI_AGENT_HOME": pi3,
-              "XDG_DATA_HOME": oc3}
+              "XDG_DATA_HOME": oc3, "GEMINI_CLI_HOME": gm3}
     ritems = json.loads(run(["--scan", "--json", "--target", "all"], allenv).stdout)
     ags = {i["agent"] for i in ritems}
     check("T41 --target all covers every agent",
-          ags == {"codex", "claude-code", "pi", "opencode"}, str(sorted(ags)))
+          ags == {"codex", "claude-code", "pi", "opencode", "gemini"}, str(sorted(ags)))
     r = run(["--scan", "--target", "all", "--lang", "en"], allenv)
     check("T42 --target all prints one section per agent",
-          r.stdout.count("directory:") >= 4, r.stdout[:120])
+          r.stdout.count("directory:") >= 5, r.stdout[:120])
     r = run(["--clean", "--yes", "--target", "all", "--json"], allenv)
     check("T43 --target all clean runs without crashing", r.returncode == 0,
           r.stderr[:150])
@@ -517,6 +543,47 @@ def main() -> int:
                   (outd / "big.bin").exists() and not lh.exists(), str(_fails))
         else:
             print("  SKIP  T89/T90  symlinks unavailable (needs developer mode on Windows)")
+
+    # ---------------- F8: Gemini CLI (third home-resolution mode) ----------------
+    # GEMINI_CLI_HOME replaces the *home* directory; ".gemini" is still appended.
+    # Getting this wrong yields $GEMINI_CLI_HOME instead of $GEMINI_CLI_HOME/.gemini,
+    # which would scan the wrong place entirely -- hence the explicit assertion.
+    g_root = mkhome("gem_home_", [(".gemini/tmp/cache.bin", 9000),
+                                  (".gemini/settings.json", 100),
+                                  (".gemini/oauth_creds.json", 50)])
+    genv = {"GEMINI_CLI_HOME": g_root}
+    gitems = json.loads(run(["--scan", "--json", "--target", "gemini"], genv).stdout)
+    gpaths = {i["name"]: _n(i["path"]) for i in gitems}
+    check("T91 GEMINI_CLI_HOME replaces the home dir, not the agent dir",
+          gpaths.get("gemini-tmp") == _n(g_root) + "/.gemini/tmp",
+          str(gpaths.get("gemini-tmp")))
+    check("T92 gemini exposes its temp dir as the cleanable item",
+          set(gpaths) == {"gemini-tmp"}, str(sorted(gpaths)))
+    check("T93 gemini never offers config or credentials for deletion",
+          not any(k in " ".join(gpaths.values())
+                  for k in ("settings.json", "oauth_creds.json")),
+          str(sorted(gpaths.values())))
+    check("T94 gemini is a first-class target",
+          "gemini" in {t["name"] for t in
+                       json.loads(run(["--list-targets", "--json"]).stdout)})
+
+    gr = json.loads(run(["--clean", "--yes", "--target", "gemini",
+                         "--json", "--lang", "en"], genv).stdout)
+    check("T95 gemini clean removes tmp and reports measured bytes",
+          gr.get("ok") is True and gr.get("actual_freed_bytes") == 9000
+          and not (Path(g_root) / ".gemini" / "tmp").exists(),
+          "ok=%s freed=%s" % (gr.get("ok"), gr.get("actual_freed_bytes")))
+    check("T96 gemini config and credentials survived the clean",
+          (Path(g_root) / ".gemini" / "settings.json").exists()
+          and (Path(g_root) / ".gemini" / "oauth_creds.json").exists())
+
+    # The "base" mode must not leak into the other agents: gemini's rel path is
+    # appended to the env var, whereas CODEX_HOME names the directory itself.
+    cx_self = mkhome("self_cx_", [(".tmp/x.bin", 1000)])
+    r_self = json.loads(run(["--scan", "--json"], {"CODEX_HOME": cx_self}).stdout)
+    check("T97 CODEX_HOME still names the directory itself",
+          any(_n(i["path"]).startswith(_n(cx_self) + "/.tmp") for i in r_self),
+          str([_n(i["path"]) for i in r_self]))
 
     for d in _tmpdirs:
         shutil.rmtree(d, ignore_errors=True)

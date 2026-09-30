@@ -2,13 +2,14 @@
 # -*- coding: utf-8 -*-
 """Clean regenerable cache/log/WAL files of AI coding agents (whitelist, confirm before clean).
 
-Agents live in the AGENTS registry: codex (default), claude-code, pi and
-opencode. Per-agent differences (home path, data format, optional capabilities
+Agents live in the AGENTS registry: codex (default), claude-code, pi,
+opencode and gemini. Per-agent differences (home path, data format, optional capabilities
 such as VACUUM) are data, not branches. Protected data (conversations, config,
 projects) is never touched.
 
 Usage: codex_clean.py [--scan | --clean] [--age N] [--vacuum] [--rebuild-logs]
-                      [--target codex|claude-code|pi|opencode|all] [--exclude LIST]
+                      [--target codex|claude-code|pi|opencode|gemini|all]
+                      [--exclude LIST]
                       [--only LIST] [--dry-run] [--list-targets] [--check N]
                       [--ignore-running]
                       [--json] [--lang en|zh|auto] [--yes]
@@ -175,19 +176,77 @@ AGENTS = {
                     "base": "tmp", "default": "opencode"},
         },
     },
+    "gemini": {
+        "label": "Gemini CLI",
+        # home_env_mode="base": GEMINI_CLI_HOME replaces the *home* directory
+        # and GEMINI_DIR ('.gemini') is still appended -- unlike CODEX_HOME,
+        # which names the directory itself.
+        "home_env": "GEMINI_CLI_HOME",
+        "home_rel": ".gemini",
+        "home_env_mode": "base",
+        # Verified against gemini-cli source, not its docs:
+        #   packages/core/src/utils/paths.ts  -> GEMINI_DIR='.gemini';
+        #       homedir() returns $GEMINI_CLI_HOME or os.homedir()
+        #   packages/core/src/config/storage.ts -> the layout below
+        #   dir = $GEMINI_CLI_HOME/.gemini  |  ~/.gemini
+        #
+        # Only tmp/ is regenerable: it holds scratch files plus the binaries
+        # downloaded into tmp/bin (TMP_DIR_NAME / BIN_DIR_NAME).
+        #
+        # Everything else must be treated as user data, because by default
+        # getGlobalRuntimeDir() returns the SAME directory as the config dir:
+        # ~/.gemini mixes config AND runtime state -- settings.json,
+        # oauth_creds.json, google_accounts.json, trustedFolders.json,
+        # installation_id, policy_integrity.json, mcp-oauth-tokens.json,
+        # a2a-oauth-tokens.json, chat history, and the user's own commands/,
+        # skills/, agents/, policies/, keybindings.json.
+        # (~/.cache/.gemini is used only under the macOS seatbelt sandbox,
+        # SANDBOX=sandbox-exec, so it is deliberately not scanned.)
+        # User skills also live in ~/.agents, outside this home entirely, so
+        # they are never in scan scope.
+        "deletable": [
+            ("gemini-tmp", "tmp", "desc.gemini-tmp"),
+        ],
+        "dbs": [],
+        "protected": [
+            "settings.json", "oauth_creds.json", "google_accounts.json",
+            "trustedFolders.json", "installation_id", "policy_integrity.json",
+            "mcp-oauth-tokens.json", "a2a-oauth-tokens.json", "auto-saved.toml",
+            "commands", "skills", "agents", "policies", "keybindings.json",
+            "history",
+        ],
+        "rebuild_db": None,
+        "discover_dbs": True,
+        "capabilities": {"vacuum": True, "rebuild_logs": False},
+        "procs": ["gemini"],
+    },
 }
 
 
 
 def agent_home(target: str) -> Path:
-    """Resolve an agent's data directory (env override wins, mirroring CODEX_HOME).
+    """Resolve an agent's data directory.
 
-    `home_sub` is appended in BOTH branches. It exists for agents whose env var
-    names a *root* rather than the agent's own directory: opencode reads
-    XDG_DATA_HOME, which is the shared XDG root, not an opencode directory.
+    `home_env_mode` selects how the env var is interpreted:
+      "dir"  (default) -- the env var names the agent's directory itself
+                          (CODEX_HOME / CLAUDE_HOME / PI_AGENT_HOME);
+      "base"           -- the env var replaces the user's *home*, and the
+                          relative path is still appended. Gemini CLI works
+                          this way: GEMINI_CLI_HOME=/x means the directory is
+                          /x/.gemini, not /x.
+
+    With no env var set both modes fall back to home / home_rel. `home_sub` is
+    appended in every branch, which is what keeps opencode working: its env var
+    points at a shared XDG root rather than at opencode's own directory.
     """
     spec = AGENTS[target]
-    base = Path(os.environ.get(spec["home_env"]) or (Path.home() / spec["home_rel"]))
+    env = os.environ.get(spec["home_env"])
+    if not env:
+        base = Path.home() / spec["home_rel"]
+    elif spec.get("home_env_mode") == "base":
+        base = Path(env) / spec["home_rel"]
+    else:
+        base = Path(env)
     sub = spec.get("home_sub")
     return base / sub if sub else base
 
@@ -284,6 +343,7 @@ _MSGS = {
         "desc.pi-tmp": "Pi temp files (regenerable; best-effort)",
         "desc.pi-logs": "Pi logs (regenerable; best-effort)",
         "desc.pi-debug-log": "Pi debug log (regenerable)",
+        "desc.gemini-tmp": "Gemini CLI temp files + downloaded binaries (regenerable)",
         "desc.opencode-log": "opencode log directory (regenerable)",
         "desc.opencode-cache": "opencode cache incl. downloaded binaries (re-downloadable)",
         "desc.opencode-tmp": "opencode temp files (regenerable)",
@@ -372,6 +432,7 @@ _MSGS = {
         "desc.pi-tmp": "Pi 临时文件(可再生; 尽力而为)",
         "desc.pi-logs": "Pi 日志(可再生; 尽力而为)",
         "desc.pi-debug-log": "Pi 调试日志(可再生)",
+        "desc.gemini-tmp": "Gemini CLI 临时文件与已下载的可执行文件(可再生)",
         "desc.opencode-log": "opencode 日志目录(可再生)",
         "desc.opencode-cache": "opencode 缓存, 含已下载的可执行文件(可重新下载)",
         "desc.opencode-tmp": "opencode 临时文件(可再生)",
