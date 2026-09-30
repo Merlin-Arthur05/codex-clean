@@ -13,6 +13,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -584,6 +585,25 @@ def main() -> int:
     check("T97 CODEX_HOME still names the directory itself",
           any(_n(i["path"]).startswith(_n(cx_self) + "/.tmp") for i in r_self),
           str([_n(i["path"]) for i in r_self]))
+
+    # ---------------- F9: cross-file consistency ----------------
+    # The Pi extension test under node carries a literal list of expected agents
+    # (node cannot reliably spawn an interpreter across sandboxes, so it is not
+    # derived at runtime). Nothing used to tie that literal back to the registry,
+    # which is why it went stale twice -- once for opencode, once for gemini, the
+    # second time only turning red on CI. This check closes that gap: adding an
+    # agent now fails here, locally and immediately.
+    try:
+        import codex_clean as _ccx
+        _want = ",".join(sorted(_ccx.AGENTS))
+    except Exception:
+        _want = None
+    _mjs = Path(__file__).resolve().parent / "test_pi_extension.mjs"
+    _src = _mjs.read_text(encoding="utf-8") if _mjs.exists() else ""
+    _m = re.search(r'join\(","\) === "([^"]+)"', _src)
+    check("T98 the Pi extension test lists exactly the registered agents",
+          _want is not None and _m is not None and _m.group(1) == _want,
+          "extension has %r, registry has %r" % (_m.group(1) if _m else None, _want))
 
     for d in _tmpdirs:
         shutil.rmtree(d, ignore_errors=True)

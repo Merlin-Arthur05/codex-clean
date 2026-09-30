@@ -120,8 +120,15 @@ try {
 } catch {
   /* leave empty */
 }
+// An explicit contract list, deliberately NOT derived by spawning python: this
+// test runs under node, and node cannot reliably spawn an interpreter in every
+// sandbox. Keeping it literal also makes the expectation readable here.
+// Drift is caught by the Python suite instead (it asserts this very string
+// matches the AGENTS registry), so adding an agent fails fast and locally
+// rather than silently here. That check exists because this list went stale
+// twice -- once for opencode, once for gemini.
 check("list-targets reports every agent",
-  rows.map((x) => x.name).sort().join(",") === "claude-code,codex,opencode,pi",
+  rows.map((x) => x.name).sort().join(",") === "claude-code,codex,gemini,opencode,pi",
   rows.map((x) => x.name).join(","));
 check("pi protected list includes user-installed packages",
   (rows.find((x) => x.name === "pi")?.protected ?? []).includes("npm"));
