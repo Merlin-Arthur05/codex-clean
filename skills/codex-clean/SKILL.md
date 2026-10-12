@@ -17,6 +17,7 @@ files that AI coding agents create for themselves:
 | **Claude Code** | `~/.claude` (`CLAUDE_HOME`) | `--target claude-code` |
 | **Pi** | `~/.pi/agent` (`PI_AGENT_HOME`) | `--target pi` |
 | **opencode** | `~/.local/share/opencode` (`XDG_DATA_HOME`) | `--target opencode` |
+| **Gemini CLI** | `~/.gemini` (`GEMINI_CLI_HOME`) | `--target gemini` |
 | all of the above | — | `--target all` |
 
 Codex is the primary target and has the deepest support (SQLite VACUUM, log-DB
@@ -81,6 +82,8 @@ protected-list safety contract.
 | `opencode-log` | `~/.local/share/opencode/log` | opencode logs |
 | `opencode-cache` | `$XDG_CACHE_HOME/opencode` or `~/.cache/opencode` | separate XDG root |
 | `opencode-tmp` | `<os-tmpdir>/opencode` | separate temp root (`OPENCODE_TMPDIR` overrides) |
+| `gemini-tmp` | `~/.gemini/tmp` | scratch + downloaded binaries; **the only regenerable
+  part of `~/.gemini`**, which otherwise mixes config, credentials and chat history |
 
 **B. Database VACUUM + WAL cleanup (data kept, space reclaimed)**
 Codex: runs `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM` on
@@ -109,9 +112,11 @@ python "<skill>\scripts\codex_clean.py" --scan
 - `--clean --yes` — skip interaction, clean all "delete + WAL" safe items
 - `--clean --yes --vacuum` — additionally VACUUM the databases (recommended full clean)
 - `--clean --yes --rebuild-logs` — additionally allow rebuilding an oversized log DB (>100 MB, backs up first; Codex only)
-- `--target codex|claude-code|pi|opencode|all` — which agent's data to clean (default `codex`)
+- `--target codex|claude-code|pi|opencode|gemini|all` — which agent's data to clean (default `codex`)
 - `--ignore-running` — skip the pre-clean check for a running agent process
 - `--version` — print `codex-clean <version>` and exit
+- `--config PATH` — read settings from a JSON file (CLI > env > file > default); the file
+  can only narrow the cleanable set or add protections, never widen it
 - `--age N` — only handle temp files **older than N days**, keeping newer ones (delete items only; preview with `--scan --age 7`)
 - `--exclude LIST` / `--only LIST` — skip or keep items by `name` or `agent:name`
 - `--dry-run` — print what `--clean` would do, change nothing

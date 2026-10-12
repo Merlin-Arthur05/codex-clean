@@ -17,6 +17,7 @@
 | **Claude Code** | `~/.claude`（`CLAUDE_HOME`） | `--target claude-code` |
 | **Pi** | `~/.pi/agent`（`PI_AGENT_HOME`） | `--target pi` |
 | **opencode** | `~/.local/share/opencode`（`XDG_DATA_HOME`） | `--target opencode` |
+| **Gemini CLI** | `~/.gemini`（`GEMINI_CLI_HOME`） | `--target gemini` |
 | *以上全部* | — | `--target all` |
 
 每个 Agent 的家目录都在运行时由其环境变量解析，缺失时回落到默认路径——没有任何一处硬编码到某台机器。
@@ -27,7 +28,7 @@
 
 ## 支持的 Agent
 
-`codex-clean` 当前支持 **三个 Agent**，每个都复用同一套"扫描 -> 确认 -> 清理"流程与保护清单安全契约。新增一个 Agent 只需在 `AGENTS` 注册表里加一条记录——差异是**数据而非分支**。
+`codex-clean` 当前支持 **五个 Agent**，每个都复用同一套"扫描 -> 确认 -> 清理"流程与保护清单安全契约。新增一个 Agent 只需在 `AGENTS` 注册表里加一条记录——差异是**数据而非分支**。
 
 | Agent | 状态 | 清理内容 |
 |---|---|---|
@@ -35,6 +36,7 @@
 | **Claude Code** | 已支持 | `~/.claude` 缓存、调试日志、shell-snapshots、statsig |
 | **Pi** | 已支持 | `~/.pi/agent` 缓存、临时文件、日志、调试日志 |
 | **opencode** | 已支持 | `log/`、`cache/`、`tmp/`，以及 `opencode.db` 的 WAL |
+| **Gemini CLI** | 已支持 | `~/.gemini` 的 `tmp/`（临时文件与已下载的可执行文件） |
 
 ## 与"通用电脑清理"工具的区别
 
@@ -69,6 +71,7 @@ AI 编程 Agent 的家目录里会不断堆积可再生数据。以 Codex（CLI 
 | **Claude Code** | `cache/`、`debug/`、`shell-snapshots/`、`statsig/` | 自动发现 | 不适用 |
 | **Pi** | `cache/`、`tmp/`、`logs/`、`pi-debug.log` | 自动发现 | 不适用 |
 | **opencode** | `log/`、`cache/`、`tmp/` | `opencode.db`（WAL） | 不适用 |
+| **Gemini CLI** | `tmp/` | 自动发现 | 不适用 |
 
 - **VACUUM** 执行 `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM`：保留数据，只回收空间。
 - **自动发现**指扫描时用通配符在 Agent 家目录下查找 `*.sqlite` / `*.sqlite3` / `*.db`，而不是依赖硬编码清单。若某 Agent 没有数据库，该参数会提示"不适用"而非报错。
@@ -82,6 +85,7 @@ AI 编程 Agent 的家目录里会不断堆积可再生数据。以 Codex（CLI 
 - **Claude Code** —— `projects/`（你的对话）、`memory/`、`plugins/`、`skills/`、`settings.json`、`config.json`、`sessions/`、`ide/`、`history.jsonl`
 - **Pi** —— `sessions/`（对话）、`skills/`、`npm/`（**用户已安装的包**）、`git/`、`bin/`、`tools/`、`prompts/`、`themes/`、`settings.json`、`trust.json`、`auth.json`、`models.json`、`AGENTS.md`、`SYSTEM.md`
 - **opencode** —— `repos/`（用户克隆的仓库）、`config/`、`state/`（锁文件）、`auth.json`
+- **Gemini CLI** —— `settings.json`、`oauth_creds.json`、`google_accounts.json`、`trustedFolders.json`、`commands/`、`skills/`、`agents/`、`policies/`，以及与之共用 `~/.gemini` 的聊天历史——只有 `tmp/` 可再生，其余全部保护
 - **所有 Agent** —— 状态库**内部的数据**（只 VACUUM，绝不删除），以及你的项目文件与工作目录
 
 ### 已知限制
@@ -155,6 +159,9 @@ python scripts/codex_clean.py --clean --yes --ignore-running
 
 # 16. 打印版本号
 python scripts/codex_clean.py --version
+
+# 17. 使用配置文件（见下文“配置文件”一节）
+python scripts/codex_clean.py --scan --config ~/.config/codex-clean/config.json
 
 # 17. 自动化：可回收达到 500 MB 时以退出码 3 返回
 python scripts/codex_clean.py --scan --check 500
@@ -291,7 +298,33 @@ pi install git:github.com/Merlin-Arthur05/codex-clean
 
 以上均跟踪于 [项目看板](https://github.com/users/Merlin-Arthur05/projects/3)。
 
-## 过滤、预演与自动化
+## 配置文件
+
+所有命令行参数都可以写进一个 JSON 配置文件，便于计划任务使用：
+
+```json
+{
+  "lang": "zh",
+  "target": "all",
+  "age": 7,
+  "exclude": ["codex:tmp"],
+  "protected": ["my-own-notes"]
+}
+```
+
+优先级为 **命令行参数 > 环境变量 > 配置文件 > 内置默认值**。用 `--config PATH` 指定文件；
+不指定时的默认位置是 Windows 的 `%APPDATA%\codex-clean\config.json`，其他系统为
+`$XDG_CONFIG_HOME/codex-clean/config.json`（即 `~/.config/codex-clean/config.json`）。
+`CODEX_CLEAN_CONFIG` 可覆盖该路径。默认位置的文件不存在会被忽略；而**显式指定**的文件
+必须存在，否则以退出码 **2** 结束。
+
+**配置文件无法扩大删除范围。** 可清理集合只来自 `AGENTS` 注册表，配置文件只能
+**收窄**它（`only` / `exclude`）或**增加**保护项（`protected` 与各 Agent 自身清单
+取并集，而不是替换）。未知的键——以及任何看起来可能引入删除目标的键——都会被忽略并在
+stderr 给出告警。这是安全属性而非整洁性要求：一个过期或拼错的键，绝不该触及注册表
+尚未认定为可再生的数据。
+
+## 过滤、演练与自动化
 
 | 参数 | 作用 |
 |---|---|
@@ -313,7 +346,7 @@ pi install git:github.com/Merlin-Arthur05/codex-clean
 ## 测试
 
 ```bash
-python tests/test_codex_clean.py          # 90 项回归检查，仅用标准库
+python tests/test_codex_clean.py          # 110 项回归检查，仅用标准库
 node   tests/test_pi_extension.mjs        # Pi 扩展加载测试（未装 Pi 时自动跳过）
 ```
 

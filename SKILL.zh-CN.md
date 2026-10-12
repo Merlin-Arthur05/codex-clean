@@ -16,6 +16,7 @@ description: "面向 AI 编程 agent 的运行时缓存/日志清理——只针
 | **Claude Code** | `~/.claude`(`CLAUDE_HOME`) | `--target claude-code` |
 | **Pi** | `~/.pi/agent`(`PI_AGENT_HOME`) | `--target pi` |
 | **opencode** | `~/.local/share/opencode`(`XDG_DATA_HOME`) | `--target opencode` |
+| **Gemini CLI** | `~/.gemini`(`GEMINI_CLI_HOME`) | `--target gemini` |
 | 以上全部 | — | `--target all` |
 
 Codex 是主力目标、支持最深(SQLite VACUUM、日志库重建)。每个 agent 复用同一套
@@ -91,9 +92,11 @@ python "<skill>\scripts\codex_clean.py" --scan
 - `--clean --yes`：跳过交互，清理全部“纯删除 + WAL”安全项
 - `--clean --yes --vacuum`：额外对数据库执行 VACUUM（推荐完整清理用这个）
 - `--clean --yes --rebuild-logs`：额外允许重建超大日志库（>100MB 时建议，先备份；仅 Codex）
-- `--target codex|claude-code|pi|opencode|all`：要清理哪个 agent 的数据（默认 `codex`）
+- `--target codex|claude-code|pi|opencode|gemini|all`：要清理哪个 agent 的数据（默认 `codex`）
 - `--ignore-running`：跳过清理前的进程占用检查
 - `--version`：打印 `codex-clean <版本号>` 后退出
+- `--config PATH`：从 JSON 配置文件读取设置（优先级 命令行>env>文件>默认）；
+  配置文件只能收窄可清理集合或增加保护项，**不能扩大**
 - `--age N`：只处理**修改时间超过 N 天**的临时文件，较新的文件保留（只对删除类生效；`--scan --age 7` 可先预览）
 - `--exclude LIST` / `--only LIST`：按 `项名` 或 `agent:项名` 跳过 / 只保留
 - `--dry-run`：只显示 `--clean` 将要做什么，不做任何改动

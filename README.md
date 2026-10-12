@@ -17,6 +17,7 @@
 | **Claude Code** | `~/.claude` (`CLAUDE_HOME`) | `--target claude-code` |
 | **Pi** | `~/.pi/agent` (`PI_AGENT_HOME`) | `--target pi` |
 | **opencode** | `~/.local/share/opencode` (`XDG_DATA_HOME`) | `--target opencode` |
+| **Gemini CLI** | `~/.gemini` (`GEMINI_CLI_HOME`) | `--target gemini` |
 | *all of the above* | — | `--target all` |
 
 Each agent's home is resolved at runtime from its environment variable, falling back to the default path — nothing is hardcoded to one machine.
@@ -27,7 +28,7 @@ Each agent's home is resolved at runtime from its environment variable, falling 
 
 ## Supported agents
 
-`codex-clean` handles **three agents** today, each with the same scan -> confirm -> clean flow and protected-list safety contract. Adding another is a single entry in the `AGENTS` registry — differences are **data, not branches**.
+`codex-clean` handles **five agents** today, each with the same scan -> confirm -> clean flow and protected-list safety contract. Adding another is a single entry in the `AGENTS` registry — differences are **data, not branches**.
 
 | Agent | Status | What gets cleaned |
 |---|---|---|
@@ -35,6 +36,7 @@ Each agent's home is resolved at runtime from its environment variable, falling 
 | **Claude Code** | Supported | `~/.claude` cache, debug, shell-snapshots, statsig |
 | **Pi** | Supported | `~/.pi/agent` cache, tmp, logs, debug log |
 | **opencode** | Supported | `log/`, `cache/`, `tmp/`, and `opencode.db` WAL |
+| **Gemini CLI** | Supported | `~/.gemini` `tmp/` (scratch files and downloaded binaries) |
 
 ## Not a generic computer cleaner
 
@@ -72,6 +74,7 @@ Everything below sits inside the selected agent's home. Anything not listed is p
 | **Claude Code** | `cache/`, `debug/`, `shell-snapshots/`, `statsig/` | auto-discovered | not applicable |
 | **Pi** | `cache/`, `tmp/`, `logs/`, `pi-debug.log` | auto-discovered | not applicable |
 | **opencode** | `log/`, `cache/`, `tmp/` | `opencode.db` (WAL) | not applicable |
+| **Gemini CLI** | `tmp/` | auto-discovered | not applicable |
 
 - **VACUUM** runs `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM`: data is preserved, only space is reclaimed.
 - **Auto-discovered** means the scan globs `*.sqlite` / `*.sqlite3` / `*.db` in the agent's home at scan time, rather than relying on a hardcoded list. If an agent has no databases, the flag reports "not applicable" instead of failing.
@@ -85,6 +88,7 @@ Every agent's own protected set, enforced by the registry:
 - **Claude Code** — `projects/` (your conversations), `memory/`, `plugins/`, `skills/`, `settings.json`, `config.json`, `sessions/`, `ide/`, `history.jsonl`
 - **Pi** — `sessions/` (conversations), `skills/`, `npm/` (**user-installed packages**), `git/`, `bin/`, `tools/`, `prompts/`, `themes/`, `settings.json`, `trust.json`, `auth.json`, `models.json`, `AGENTS.md`, `SYSTEM.md`
 - **opencode** — `repos/` (cloned user repos), `config/`, `state/` (lock files), `auth.json`
+- **Gemini CLI** — `settings.json`, `oauth_creds.json`, `google_accounts.json`, `trustedFolders.json`, `commands/`, `skills/`, `agents/`, `policies/`, and the chat history that shares `~/.gemini` — only `tmp/` is regenerable, so everything else is protected
 - **All agents** — data *inside* state databases (VACUUM only, never deletion), and your project files & work directories
 
 ### Known limitations
@@ -158,6 +162,9 @@ python scripts/codex_clean.py --clean --yes --ignore-running
 
 # 16. Print the version
 python scripts/codex_clean.py --version
+
+# 17. Apply a config file (see “Configuration file” below)
+python scripts/codex_clean.py --scan --config ~/.config/codex-clean/config.json
 
 # 17. Automation: exit 3 when reclaimable space reaches 500 MB
 python scripts/codex_clean.py --scan --check 500
@@ -302,6 +309,34 @@ The extension is a thin wrapper that shells out to the same Python script, so it
 
 All tracked on the [project board](https://github.com/users/Merlin-Arthur05/projects/3).
 
+## Configuration file
+
+Flags can also be set once in a JSON config file, which is handy for scheduled runs:
+
+```json
+{
+  "lang": "en",
+  "target": "all",
+  "age": 7,
+  "exclude": ["codex:tmp"],
+  "protected": ["my-own-notes"]
+}
+```
+
+Precedence is **CLI flag > environment variable > config file > built-in default.** Point at a
+specific file with `--config PATH`; otherwise the default location is
+`%APPDATA%\codex-clean\config.json` on Windows and `$XDG_CONFIG_HOME/codex-clean/config.json`
+(`~/.config/codex-clean/config.json`) elsewhere. `CODEX_CLEAN_CONFIG` overrides the path. A
+missing file at the default location is ignored; one you name explicitly must exist, or the run
+exits **2**.
+
+**A config file cannot widen what gets deleted.** The cleanable set comes from the `AGENTS`
+registry alone, so config can only *narrow* it (`only` / `exclude`) or *add* protections
+(`protected` is unioned with each agent's own list, never a replacement). Unknown keys — and
+any key that looks like it might introduce a delete target — are ignored with a warning on
+stderr. That is a safety property, not tidiness: a stale or mistyped key must never be able to
+reach data the registry does not already consider regenerable.
+
 ## Filtering, dry-run & automation
 
 | Flag | What it does |
@@ -311,6 +346,7 @@ All tracked on the [project board](https://github.com/users/Merlin-Arthur05/proj
 | `--only LIST` | keep only the listed items (inverse of `--exclude`) |
 | `--dry-run` | print the plan `--clean` would execute, change nothing |
 | `--list-targets` | print supported agents, their homes and capabilities |
+| `--config PATH` | read settings from a JSON file (see below) |
 | `--check N` | exit **3** when reclaimable space reaches N MB (0 = off) |
 
 Notes:
@@ -325,7 +361,7 @@ Notes:
 ## Tests
 
 ```bash
-python tests/test_codex_clean.py          # 90 regression checks, standard library only
+python tests/test_codex_clean.py          # 110 regression checks, standard library only
 node   tests/test_pi_extension.mjs        # Pi extension load test (skips if Pi absent)
 ```
 

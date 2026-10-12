@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-10-12
+
+### Added
+- **Gemini CLI support (#18).** `--target gemini` cleans `~/.gemini/tmp` and nothing else.
+  Paths were verified from Gemini CLI's own source (`utils/paths.ts` -> `GEMINI_DIR` and
+  `homedir()`; `config/storage.ts` for the layout) rather than from its docs, and that second
+  file changed the scope: by default `getGlobalRuntimeDir()` returns the *same* directory as
+  the config dir, so `~/.gemini` mixes config, credentials, user content and chat history
+  (`~/.cache/.gemini` is macOS-sandbox-only). Only `tmp/` is provably regenerable, so
+  everything else is protected.
+- **Config file (#17).** A JSON file can set `lang`, `target`, `age`, `exclude`, `only`,
+  `vacuum`, `rebuild_logs`, `dry_run`, `ignore_running` and `protected`. Precedence is
+  **CLI flag > environment variable > config file > built-in default**. `--config PATH`
+  selects a file; the default is per-OS. An explicitly named file must exist (exit `2`
+  otherwise); a missing one at the default location is ignored.
+- New `home_env_mode="base"` in the registry: an env var that replaces the user's *home* while
+  the relative path is still appended. `GEMINI_CLI_HOME=/x` means `/x/.gemini`, not `/x`.
+
+### Security
+- **A config file cannot widen the cleanable set.** The whitelist is derived from the `AGENTS`
+  registry alone; config may only narrow it (`only`/`exclude`) or add protections
+  (`protected` is unioned with each agent's list, never a replacement). Unknown keys — and any
+  key suggesting a new delete target — are ignored with a warning on stderr. Covered by
+  T104/T105/T110, which inject `deletable`, `targets`, `cleanable`, `whitelist` and
+  `add_cleanable` and assert the item set is unchanged.
+
+### Changed
+- Test suite 90 -> **110** checks. The config tests always point `CODEX_CLEAN_CONFIG` at a
+  temp path so a developer's real config can never influence them.
+- `run()` in the test suite now injects a throwaway home for any agent home a test forgets to
+  set, so no test can reach a real agent directory.
+
+### Compatibility
+Backward compatible with v1.8.0: existing flags and the default target are unchanged. New exit
+code usage is limited to the config errors above (`2`).
+
 ## [1.8.0] - 2026-09-22
 
 ### Added

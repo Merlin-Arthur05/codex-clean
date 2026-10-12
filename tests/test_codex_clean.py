@@ -605,6 +605,87 @@ def main() -> int:
           _want is not None and _m is not None and _m.group(1) == _want,
           "extension has %r, registry has %r" % (_m.group(1) if _m else None, _want))
 
+    # ---------------- F10: config file ----------------
+    cf_home = mkhome("cfg_home_", [(".tmp/a.bin", 1000),
+                                   ("plugins/cache/b.bin", 2000)])
+    cfg_dir = Path(tempfile.mkdtemp(prefix="cfg_file_"))
+    _tmpdirs.append(str(cfg_dir))
+    no_cfg = str(cfg_dir / "absent.json")      # default path that does not exist
+
+    def wcfg(obj, name="c.json"):
+        fp = cfg_dir / name
+        fp.write_text(json.dumps(obj), encoding="utf-8")
+        return str(fp)
+
+    def cenv(cfg_path=None, **extra):
+        """Env for config tests: never let the real default config leak in."""
+        e = {"CODEX_HOME": cf_home, "CODEX_CLEAN_CONFIG": cfg_path or no_cfg}
+        e.update(extra)
+        return e
+
+    def cscan(cfg_path=None, args=(), **extra):
+        r = run(["--scan", "--json", *args], cenv(cfg_path, **extra))
+        try:
+            return {i["name"] for i in json.loads(r.stdout)}, r
+        except Exception:
+            return set(), r
+
+    base, _ = cscan()
+    check("T99 baseline scan finds the fixture items",
+          {"tmp", "plugin-cache"} <= base, str(sorted(base)))
+
+    p = wcfg({"exclude": ["codex:tmp"]})
+    got, _ = cscan(p)
+    check("T100 a config file can narrow the set",
+          "tmp" not in got and "plugin-cache" in got, str(sorted(got)))
+
+    # Precedence: CLI > env > config > default. Each case excludes a different item.
+    got, _ = cscan(p, args=["--exclude", "codex:plugin-cache"],
+                   CODEX_CLEAN_EXCLUDE="codex:tmp")
+    check("T101 CLI beats both env and config",
+          "plugin-cache" not in got and "tmp" in got, str(sorted(got)))
+    got, _ = cscan(p, CODEX_CLEAN_EXCLUDE="codex:plugin-cache")
+    check("T102 env beats config", "plugin-cache" not in got and "tmp" in got,
+          str(sorted(got)))
+    got, _ = cscan(p)
+    check("T103 config applies when neither CLI nor env sets it",
+          "tmp" not in got and "plugin-cache" in got, str(sorted(got)))
+
+    # SECURITY: the whitelist lives in the registry, so a config file cannot add to it.
+    p = wcfg({"deletable": ["evil"], "targets": ["/etc"], "cleanable": ["x"],
+              "whitelist": ["y"], "add_cleanable": ["z"]})
+    got, r = cscan(p)
+    check("T104 a config file cannot add a delete target", got == base,
+          str(sorted(got)))
+    check("T105 unknown config keys are reported on stderr",
+          "deletable" in r.stderr and "targets" in r.stderr, r.stderr[:120])
+
+    # `protected` from the config is additive, never a replacement.
+    p = wcfg({"protected": ["my-notes"]})
+    rows = json.loads(run(["--list-targets", "--json"],
+                          cenv(p)).stdout)
+    row = [x for x in rows if x["name"] == "codex"][0]
+    check("T106 config protections are added to the registry's",
+          "my-notes" in row["protected"] and "sessions" in row["protected"],
+          str(row["protected"]))
+
+    # An explicit path must exist; the default one is optional.
+    r = run(["--scan", "--json", "--config", str(cfg_dir / "nope.json")],
+            {"CODEX_HOME": cf_home})
+    check("T107 an explicitly requested missing config fails", r.returncode == 2,
+          str(r.returncode))
+    r = run(["--scan", "--json"], cenv())
+    check("T108 a missing default config is not an error", r.returncode == 0,
+          "exit=%s err=%s" % (r.returncode, r.stderr[:60]))
+
+    # Config filtering narrows only; it can never surface a new item.
+    p = wcfg({"only": ["codex:tmp"]})
+    got, _ = cscan(p)
+    check("T109 config `only` narrows the set", got == {"tmp"}, str(sorted(got)))
+    p = wcfg({"only": ["codex:sessions"]})       # a protected entry, not an item
+    got, _ = cscan(p)
+    check("T110 config cannot surface a protected path", got == set(), str(sorted(got)))
+
     for d in _tmpdirs:
         shutil.rmtree(d, ignore_errors=True)
 

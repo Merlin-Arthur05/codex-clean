@@ -7,12 +7,17 @@ opencode and gemini. Per-agent differences (home path, data format, optional cap
 such as VACUUM) are data, not branches. Protected data (conversations, config,
 projects) is never touched.
 
-Usage: codex_clean.py [--scan | --clean] [--age N] [--vacuum] [--rebuild-logs]
+Usage: codex_clean.py [--scan | --clean] [--config PATH] [--age N] [--vacuum]
+                      [--rebuild-logs]
                       [--target codex|claude-code|pi|opencode|gemini|all]
                       [--exclude LIST]
                       [--only LIST] [--dry-run] [--list-targets] [--check N]
                       [--ignore-running]
                       [--json] [--lang en|zh|auto] [--yes]
+Settings order: CLI flag > environment variable > config file > built-in
+default. The cleanable set itself always comes from the AGENTS registry: a
+config file may only narrow it (only/exclude) or add protections.
+
 Lang order: --lang > CODEX_CLEAN_LANG > LANG/LC_ALL > OS UI lang > en.
 Exit codes: 0 ok, 2 bad args, 3 reclaimable reached --check threshold,
              4 the cleanup did not fully succeed (some paths survived).
@@ -32,7 +37,7 @@ import time
 from pathlib import Path
 
 # Single source of truth: keep in sync with the GitHub Release tag (v1.7.0).
-VERSION = "1.8.0"
+VERSION = "1.9.0"
 
 # Per-agent registry. Adding an agent = one entry here; nothing else branches on
 # the agent. Paths are relative to the agent home and resolved at scan time.
@@ -353,6 +358,13 @@ _MSGS = {
         "proc.hint2": "Best practice: quit the agent first, or pass --ignore-running to skip this check.",
         "proc.prompt": "Continue anyway? (y/N):",
         "arg.ignorerunning": "skip the running-process check before cleaning",
+        "arg.config": "path to a JSON config file (default: per-OS location)",
+        "cfg.missing": "config file not found: {path}",
+        "cfg.bad": "cannot read config {path}: {err}",
+        "cfg.notobj": "config {path} must be a JSON object",
+        "cfg.unknown": "ignoring unknown config key: {name}",
+        "cfg.badtype": "ignoring config key {name}: wrong type",
+        "cfg.bad_target": "invalid target in config: {name}",
         "desc.discovered-db": "Auto-discovered SQLite DB (VACUUM/WAL only, data kept)",
         "arg.exclude": "comma-separated item or agent:item names to skip",
         "arg.only": "comma-separated item or agent:item names to keep (inverse of --exclude)",
@@ -442,6 +454,13 @@ _MSGS = {
         "proc.hint2": "最佳实践: 先退出该 agent, 或用 --ignore-running 跳过此检查。",
         "proc.prompt": "仍要继续吗? (y/N):",
         "arg.ignorerunning": "跳过清理前的进程占用检查",
+        "arg.config": "JSON 配置文件路径（默认取系统对应位置）",
+        "cfg.missing": "找不到配置文件: {path}",
+        "cfg.bad": "无法读取配置 {path}: {err}",
+        "cfg.notobj": "配置 {path} 必须是一个 JSON 对象",
+        "cfg.unknown": "忽略未知的配置项: {name}",
+        "cfg.badtype": "忽略配置项 {name}: 类型不对",
+        "cfg.bad_target": "配置中的目标无效: {name}",
         "desc.discovered-db": "自动发现的 SQLite 库(仅VACUUM/WAL, 保留数据)",
         "arg.exclude": "逗号分隔的项名或 agent:项名, 跳过这些项",
         "arg.only": "逗号分隔的项名或 agent:项名, 只保留这些项(--exclude 的反义)",
@@ -895,13 +914,101 @@ def filter_items(items, exclude_csv: str, only_csv: str) -> list:
     return out
 
 
+# --------------------------------------------------------------------- config
+CONFIG_ENV = "CODEX_CLEAN_CONFIG"
+
+# The only keys a config file may set. Note what is deliberately absent: there
+# is no key that adds a cleanable path. The whitelist is derived from AGENTS
+# alone, so a config file is structurally unable to widen it -- it can only
+# narrow the set (only/exclude) or add protections. `protected` is additive by
+# construction (see _protected_union).
+CONFIG_KEYS = ("lang", "target", "exclude", "only", "age", "check", "vacuum",
+               "rebuild_logs", "dry_run", "ignore_running", "protected")
+
+# Protections contributed by the config file, appended to each agent's own list.
+EXTRA_PROTECTED = []
+
+
+def default_config_path() -> Path:
+    """Per-OS default config location. The file is optional there."""
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(base) / "codex-clean" / "config.json"
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "codex-clean" / "config.json"
+
+
+def load_config(path_arg: str):
+    """Load the config file. Returns (config, warnings, error).
+
+    Warnings and the error are (i18n_key, kwargs) pairs so they can be rendered
+    after the language is known -- the file itself may set that language.
+
+    An explicitly requested file must exist and parse. The default location is
+    optional: absent means "no config", not an error. Unknown keys are dropped
+    with a warning rather than honoured, which is the security property and not
+    merely tidiness -- a typo or a stale key must never be able to smuggle in a
+    delete target.
+    """
+    warnings, error = [], None
+    explicit = bool(path_arg)
+    if not path_arg:
+        path_arg = os.environ.get(CONFIG_ENV) or str(default_config_path())
+    p = Path(path_arg)
+    if not p.exists():
+        if explicit:
+            return {}, warnings, ("cfg.missing", {"path": str(p)})
+        return {}, warnings, None
+    try:
+        raw = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as e:
+        return {}, warnings, ("cfg.bad", {"path": str(p), "err": e})
+    if not isinstance(raw, dict):
+        return {}, warnings, ("cfg.notobj", {"path": str(p)})
+    cfg = {}
+    for k, v in raw.items():
+        if k in CONFIG_KEYS:
+            cfg[k] = v
+        else:
+            warnings.append(("cfg.unknown", {"name": str(k)}))
+    if "protected" in cfg and not isinstance(cfg["protected"], list):
+        warnings.append(("cfg.badtype", {"name": "protected"}))
+        del cfg["protected"]
+    return cfg, warnings, None
+
+
+def _pick(cli_val, env_val, cfg_val, default):
+    """Precedence: CLI flag > environment variable > config file > default."""
+    if cli_val is not None:
+        return cli_val
+    if env_val is not None:
+        return env_val
+    if cfg_val is not None:
+        return cfg_val
+    return default
+
+
+def _as_csv(v) -> str:
+    """Accept either a comma string or a JSON list for the list-valued options."""
+    if isinstance(v, (list, tuple)):
+        return ",".join(str(x) for x in v)
+    return "" if v is None else str(v)
+
+
 def _protected_union(targets) -> list:
-    """Protected entries of every selected agent (order preserved, deduped)."""
+    """Protected entries of every selected agent (order preserved, deduped).
+
+    Entries contributed by the config file are appended: a config file may ADD
+    protections but can never remove a registry one.
+    """
     out = []
     for t in targets:
         for p in AGENTS[t]["protected"]:
             if p not in out:
                 out.append(p)
+    for p in EXTRA_PROTECTED:
+        if p not in out:
+            out.append(p)
     return out
 
 
@@ -916,7 +1023,7 @@ def cmd_list_targets(json_mode: bool) -> int:
             "deletable": [n for n, _r, _k in sp["deletable"]],
             "dbs": [n for n, _r, _k in sp["dbs"]],
             "discover_dbs": sp.get("discover_dbs", False),
-            "protected": sp["protected"],
+            "protected": _protected_union([t]),
             "capabilities": sp["capabilities"],
         })
     if json_mode:
@@ -1009,35 +1116,66 @@ def main():
     ap = argparse.ArgumentParser(description=_t("prog.desc", v=VERSION))
     ap.add_argument("--version", action="version",
                     version="codex-clean %s" % VERSION)
+    ap.add_argument("--config", metavar="PATH", default=None, help=_t("arg.config"))
     ap.add_argument("--scan", action="store_true", help=_t("arg.scan"))
     ap.add_argument("--clean", action="store_true", help=_t("arg.clean"))
     ap.add_argument("--yes", action="store_true", help=_t("arg.yes"))
     ap.add_argument("--vacuum", action="store_true", help=_t("arg.vacuum"))
     ap.add_argument("--rebuild-logs", action="store_true", help=_t("arg.rebuild"))
-    ap.add_argument("--age", type=int, default=0, metavar="N", help=_t("arg.age"))
-    ap.add_argument("--target", choices=sorted(AGENTS) + ["all"], default="codex",
+    ap.add_argument("--age", type=int, default=None, metavar="N", help=_t("arg.age"))
+    ap.add_argument("--target", choices=sorted(AGENTS) + ["all"], default=None,
                     help=_t("arg.target"))
-    ap.add_argument("--lang", choices=["en", "zh", "auto"], default="auto",
+    ap.add_argument("--lang", choices=["en", "zh", "auto"], default=None,
                     help=_t("arg.lang"))
     ap.add_argument("--json", action="store_true", help=_t("arg.json"))
-    ap.add_argument("--exclude", metavar="LIST", default="", help=_t("arg.exclude"))
-    ap.add_argument("--only", metavar="LIST", default="", help=_t("arg.only"))
+    ap.add_argument("--exclude", metavar="LIST", default=None, help=_t("arg.exclude"))
+    ap.add_argument("--only", metavar="LIST", default=None, help=_t("arg.only"))
     ap.add_argument("--dry-run", action="store_true", help=_t("arg.dryrun"))
     ap.add_argument("--list-targets", action="store_true", help=_t("arg.listtargets"))
-    ap.add_argument("--check", type=int, default=0, metavar="N", help=_t("arg.check"))
+    ap.add_argument("--check", type=int, default=None, metavar="N", help=_t("arg.check"))
     ap.add_argument("--ignore-running", action="store_true",
                     help=_t("arg.ignorerunning"))
     args = ap.parse_args()
 
-    if args.list_targets:
-        return cmd_list_targets(args.json)
+    # Config first, so every other setting can fall back to it. Its diagnostics
+    # are deferred: the file itself may choose the language they print in.
+    cfg, cfg_warn, cfg_err = load_config(args.config)
+    if isinstance(cfg.get("protected"), list):
+        EXTRA_PROTECTED.extend(str(x) for x in cfg["protected"])
+
+    _env = lambda n: (os.environ.get(n) or None)  # noqa: E731
+    args.lang = _pick(args.lang, _env("CODEX_CLEAN_LANG"), cfg.get("lang"), "auto")
+    _LANG = _resolve_lang(args.lang)
+
+    for key, kw in cfg_warn:
+        print(_t(key, **kw), file=sys.stderr)
+    if cfg_err:
+        print(_t(cfg_err[0], **cfg_err[1]), file=sys.stderr)
+        return 2
+
+    args.target = _pick(args.target, _env("CODEX_CLEAN_TARGET"), cfg.get("target"), "codex")
+    args.exclude = _as_csv(_pick(args.exclude, _env("CODEX_CLEAN_EXCLUDE"),
+                                 cfg.get("exclude"), ""))
+    args.only = _as_csv(_pick(args.only, _env("CODEX_CLEAN_ONLY"), cfg.get("only"), ""))
+    args.age = int(_pick(args.age, _env("CODEX_CLEAN_AGE"), cfg.get("age"), 0))
+    args.check = int(_pick(args.check, _env("CODEX_CLEAN_CHECK"), cfg.get("check"), 0))
+    args.vacuum = bool(_pick(args.vacuum, None, cfg.get("vacuum"), False))
+    args.rebuild_logs = bool(_pick(args.rebuild_logs, None, cfg.get("rebuild_logs"), False))
+    args.dry_run = bool(_pick(args.dry_run, None, cfg.get("dry_run"), False))
+    args.ignore_running = bool(_pick(args.ignore_running, None,
+                                     cfg.get("ignore_running"), False))
+
+    # `choices` only guards the CLI, so a config-supplied target needs its own check.
+    if args.target not in list(AGENTS) + ["all"]:
+        print(_t("cfg.bad_target", name=args.target), file=sys.stderr)
+        return 2
     if args.check < 0:
         ap.error("--check must be >= 0")
-
     if args.age < 0:
         ap.error("--age must be >= 0")
 
-    _LANG = _resolve_lang(args.lang)
+    if args.list_targets:
+        return cmd_list_targets(args.json)
     _AGE_DAYS = args.age
     targets = resolve_targets(args.target)
     items = []
